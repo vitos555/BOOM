@@ -16,9 +16,14 @@
   Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
 */
 
-#ifndef BOOM_PYTHON_PRIOR_SPECIFICATION_HPP_
-#define BOOM_PYTHON_PRIOR_SPECIFICATION_HPP_
+#ifndef BOOM_PYBSTS_PRIOR_SPECIFICATION_HPP_
+#define BOOM_PYBSTS_PRIOR_SPECIFICATION_HPP_
 
+#include "Models/BetaModel.hpp"
+#include "Models/GammaModel.hpp"
+#include "Models/UniformModel.hpp"
+#include "Models/LognormalModel.hpp"
+#include "Models/TruncatedGammaModel.hpp"
 #include "Models/ChisqModel.hpp"
 #include "Models/DoubleModel.hpp"
 #include "Models/Glm/VariableSelectionPrior.hpp"
@@ -31,9 +36,81 @@ namespace BOOM{
 
   class MarkovModel;
 
-  namespace PythonInterface{
+  namespace pybsts{
     // Convenience classes for communicating commonly used Python objects
     // to BOOM.
+
+    class DoublePrior {
+      public:
+        DoublePrior(const std::string &family="", double a=0.0, double b=0.0, double a_truncation=0.0, double b_truncation=0.0);
+        ~DoublePrior() {}
+
+        const std::string& family() const { return family_; }
+        double a() const { return a_; }
+        double b() const { return b_; }
+        double a_truncation() const { return a_truncation_; }
+        double b_truncation() const { return b_truncation_; }
+
+      private:
+        std::string family_;
+        double a_;
+        double b_;
+        double a_truncation_;
+        double b_truncation_;
+    };
+
+    class PriorSpecification {
+      public:
+        explicit PriorSpecification(
+          Vector prior_inclusion_probabilities=Vector(),
+          Vector prior_mean=Vector(),
+          SpdMatrix prior_precision=SpdMatrix(),
+          Vector prior_variance_diagonal=Vector(),
+          int max_flips=0,
+          double initial_value=0.0,
+          double mu=0.0,
+          double prior_df=0.0,
+          double prior_guess=0.0,
+          double sigma_guess=1.0,
+          double sigma_upper_limit=1.0,
+          bool truncate=false,
+          bool positive=false,
+          bool fixed=false
+          );
+        ~PriorSpecification() {}
+
+        const Vector &prior_inclusion_probabilities() const { return prior_inclusion_probabilities_; }
+        const Vector &prior_mean() const { return prior_mean_; }
+        const SpdMatrix &prior_precision() const { return prior_precision_; }
+        const Vector &prior_variance_diagonal() const { return prior_variance_diagonal_; }
+        int max_flips() const { return max_flips_; }
+        double initial_value() const { return initial_value_; }
+        double mu() const { return mu_; }
+        double prior_df() const { return prior_df_; }
+        double prior_guess() const { return prior_guess_; }
+        double sigma_guess() const { return sigma_guess_; }
+        double sigma_upper_limit() const { return sigma_upper_limit_; }
+        bool truncate() const { return truncate_; }
+        bool positive() const { return positive_; }
+        bool fixed() const { return fixed_; }
+
+      private:
+        Vector prior_inclusion_probabilities_;
+        Vector prior_mean_;
+        SpdMatrix prior_precision_;
+        Vector prior_variance_diagonal_;
+        int max_flips_;
+        double initial_value_;
+        double mu_;
+        double prior_df_;
+        double prior_guess_;
+        double sigma_guess_;
+        double sigma_upper_limit_;
+        bool truncate_;
+        bool positive_;
+        bool fixed_;
+    };
+
 
     // For encoding an inverse Gamma prior on a variance parameter.
     class SdPrior {
@@ -532,7 +609,10 @@ namespace BOOM{
     inline std::ostream & operator<<(std::ostream &out, const MvnPrior &p) {
       return p.print(out); }
 
-  }  // namespace PythonInterface
+    Ptr<LocationScaleDoubleModel> create_double_model(std::shared_ptr<DoublePrior> spec);
+
+
+  }  // namespace pybsts
 }  // namespace BOOM
 
-#endif // BOOM_PYTHON_PRIOR_SPECIFICATION_HPP_
+#endif // BOOM_PYBSTS_PRIOR_SPECIFICATION_HPP_

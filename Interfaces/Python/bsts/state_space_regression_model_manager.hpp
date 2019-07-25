@@ -35,23 +35,17 @@ class StateSpaceRegressionHoldoutErrorSampler
   //     distribution.
   //   errors:  A matrix that will hold the output of the simulation.
   StateSpaceRegressionHoldoutErrorSampler(
-      const Ptr<StateSpaceRegressionModel> &model,
+      std::unique_ptr<ScalarManagedModel> model,
       const Vector &holdout_responses,
       const Matrix &holdout_predictors,
       int niter,
       bool standardize,
-      Matrix *errors)
-      : model_(model),
-      holdout_responses_(holdout_responses),
-      holdout_predictors_(holdout_predictors),
-      niter_(niter),
-      standardize_(standardize),
-      errors_(errors) {}
+      Matrix *errors);
 
   void sample_holdout_prediction_errors() override;
 
  private:
-  Ptr<StateSpaceRegressionModel> model_;
+  std::unique_ptr<ScalarManagedModel> model_;
   Vector holdout_responses_;
   Matrix holdout_predictors_;
   int niter_;
@@ -59,38 +53,48 @@ class StateSpaceRegressionHoldoutErrorSampler
   Matrix *errors_;
 };
 
+class StateSpaceRegressionManagedModel : public ScalarManagedModel {
+  public:
+    Vector SimulateForecast() override;
+    void AddData(
+      const Vector &response,
+      const Matrix &predictors,
+      const std::vector<bool> &response_is_observed) override;
+    void AddData(const Vector &response, const std::vector<bool> &response_is_observed) override;
+    const Matrix& predictors() const { return predictors_; }
+
+  protected:
+    void update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) override;
+
+  private:
+    Matrix forecast_predictors_;
+    Matrix predictors_;
+};
+
 class StateSpaceRegressionModelManager
     : public GaussianModelManagerBase {
- public:
-  explicit StateSpaceRegressionModelManager(int predictor_dimension);
+  public:
+    explicit StateSpaceRegressionModelManager(int predictor_dimension);
 
-  StateSpaceRegressionModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification) override;
+    StateSpaceRegressionModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification,
+      std::shared_ptr<PythonListIoManager> io_manager) override;
 
-  HoldoutErrorSampler CreateHoldoutSampler(
-    const ScalarStateSpaceSpecification *specification,
-    const PyBstsOptions *options,
-    const Vector& responses,
-    const Matrix& predictors,
-    const std::vector<bool> &response_is_observed,
-    int cutpoint,
-    int niter,
-    bool standardize,
-    Matrix *prediction_error_output) override;
-  
-  Vector SimulateForecast(const Vector &final_state) override;
+    HoldoutErrorSampler CreateHoldoutSampler(
+      const ScalarStateSpaceSpecification *specification,
+      ModelOptions *options,
+      const Vector& responses,
+      const Matrix& predictors,
+      const std::vector<bool> &response_is_observed,
+      int cutpoint,
+      int niter,
+      bool standardize,
+      Matrix *prediction_error_output) override;
 
- private:
-  void SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specification);
-  void SetOdaRegressionSampler(const ScalarStateSpaceSpecification *specification);
-  void DropUnforcedCoefficients(const Ptr<GlmModel> &glm, const BOOM::Vector &prior_inclusion_probs);  
-  void AddData(
-    const Vector &response,
-    const Matrix &predictors,
-    const std::vector<bool> &response_is_observed);
+  private:  
+    void SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specification, const StateSpaceRegressionModel *sampling_model);
+    void SetOdaRegressionSampler(const ScalarStateSpaceSpecification *specification, const StateSpaceRegressionModel *sampling_model);
 
-  Ptr<StateSpaceRegressionModel> model_;
-  int predictor_dimension_;
-  Matrix forecast_predictors_;
+    int predictor_dimension_;
 };
 
 }  // namespace pybsts

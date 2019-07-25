@@ -33,7 +33,44 @@
 #include "distributions.hpp"
 
 namespace BOOM {
-  namespace PythonInterface {
+  namespace pybsts {
+    DoublePrior::DoublePrior(const std::string &family, 
+      double a, double b, double a_truncation, double b_truncation) :
+      family_(family), a_(a), b_(b), a_truncation_(a_truncation), b_truncation_(b_truncation)
+    {}
+
+    PriorSpecification::PriorSpecification(
+          Vector prior_inclusion_probabilities,
+          Vector prior_mean,
+          SpdMatrix prior_precision,
+          Vector prior_variance_diagonal,
+          int max_flips,
+          double initial_value,
+          double mu,
+          double prior_df,
+          double prior_guess,
+          double sigma_guess,
+          double sigma_upper_limit,
+          bool truncate,
+          bool positive,
+          bool fixed
+          ) : 
+      prior_inclusion_probabilities_(prior_inclusion_probabilities),
+      prior_mean_(prior_mean),
+      prior_precision_(prior_precision),
+      prior_variance_diagonal_(prior_variance_diagonal),
+      max_flips_(max_flips),
+      initial_value_(initial_value),
+      mu_(mu),
+      prior_df_(prior_df),
+      prior_guess_(prior_guess),
+      sigma_guess_(sigma_guess),
+      sigma_upper_limit_(sigma_upper_limit),
+      truncate_(truncate),
+      positive_(positive),
+      fixed_(fixed)
+    {}
+
     SdPrior::SdPrior(double prior_guess, double prior_df, double initial_value, bool fixed, double upper_limit)
         : prior_guess_(prior_guess),
           prior_df_(prior_df),
@@ -381,5 +418,25 @@ namespace BOOM {
     //   }
     // }
 
-  }  // namespace PythonInterface
+    Ptr<LocationScaleDoubleModel> create_double_model(
+        std::shared_ptr<DoublePrior> spec) {
+      if (spec->family() == "GammaPrior") {
+        return new GammaModel(spec->a(), spec->b());
+      } else if (spec->family() == "BetaPrior") {
+        return new BetaModel(spec->a(), spec->b());
+      } else if (spec->family() == "NormalPrior") {
+        return new GaussianModel(spec->a(), spec->b() * spec->b());
+      } else if (spec->family() == "UniformPrior") {
+        return new UniformModel(spec->a(), spec->b());
+      } else if (spec->family() == "LognormalPrior") {
+        return new LognormalModel(spec->a(), spec->b());
+      } else if (spec->family() == "TruncatedGammaPrior") {
+        return new TruncatedGammaModel(
+            spec->a(), spec->b(), spec->a_truncation(),
+            spec->b_truncation());
+      }
+      return nullptr;
+    }
+
+  }  // namespace pybsts
 }  // namespace BOOM

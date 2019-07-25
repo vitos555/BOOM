@@ -27,6 +27,8 @@
 #include "LinAlg/Matrix.hpp"
 #include "cpputil/Date.hpp"
 #include "prior_specification.hpp"
+#include "list_io.hpp"
+#include "distributions/rng.hpp"
 
 namespace BOOM {
   namespace pybsts {
@@ -34,7 +36,7 @@ namespace BOOM {
     class ScalarModelManager;
     class StateSpaceSpecification;
     class ScalarStateSpaceSpecification;
-    class PyBstsOptions;
+    class ModelOptions;
 
     //===========================================================================
     // The code that computes out of sample one-step prediction errors is
@@ -64,18 +66,21 @@ namespace BOOM {
       public:
         explicit HoldoutErrorSampler(HoldoutErrorSamplerImpl *impl)
           : impl_(impl) {}
-        void operator()() {impl_->sample_holdout_prediction_errors();}
+        void operator()() { impl_->sample_holdout_prediction_errors(); }
       private:
         std::unique_ptr<HoldoutErrorSamplerImpl> impl_;
     };
 
-    class ModelManager {
+    class ManagedModel {
       public:
-        ModelManager();
-        virtual ~ModelManager() {}
+        explicit ManagedModel(ModelOptions *options, std::shared_ptr<PythonListIoManager> io_manager);
+        virtual ~ManagedModel() {}
 
-        virtual bool fit(Matrix x, Vector y) = 0;
-        virtual Matrix predict(Matrix x) = 0;
+        virtual bool fit(const Vector &y,
+                 const Matrix &x = Matrix(),
+                 const std::vector<bool> &response_is_observed = std::vector<bool>()) = 0;
+        virtual Matrix predict(const Matrix &x, const std::vector<int> &forecast_timestamps = std::vector<int>()) = 0;
+        virtual Vector SimulateForecast() = 0;
 
         const int NumberOfTimePoints() const { return number_of_time_points_; }
 
@@ -83,18 +88,28 @@ namespace BOOM {
           return timestamps_are_trivial_ ? i : timestamp_mapping_[i] - 1;
         }
 
+        std::shared_ptr<ModelOptions> options() { return options_; }
+        std::shared_ptr<PythonListIoManager> io_manager() { return io_manager_; }
+
+        const Vector &final_state() const { return final_state_; }
         const std::vector<int> & ForecastTimestamps() { return forecast_timestamps_; }
+        RNG & rng() {return rng_;}
 
-        std::shared_ptr<PyBstsOptions> options() const { return options_; }
-        std::shared_ptr<ScalarStateSpaceModelBase> observation_model() const { return observation_model_; }
+        void SetDynamicRegressionStateComponentPositions(
+            const std::vector<int> &positions) {
+          dynamic_regression_state_positions_ = positions;
+        }
 
-        RNG & rng() {return rng_;}     
       protected:
-        std::shared_ptr<ScalarStateSpaceModelBase> observation_model_;
-        std::shared_ptr<PyBstsOptions> options_;
         Vector final_state_;
+        std::shared_ptr<PythonListIoManager> io_manager_;
+        virtual void update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) {
+          forecast_timestamps_ = forecast_timestamps;
+        }
 
       private:
+        std::shared_ptr<ModelOptions> options_;
+
         RNG rng_;
 
         //----------------------------------------------------------------------
@@ -118,6 +133,49 @@ namespace BOOM {
         // where 'index' refers to the state component's position in the list of
         // state models stored in the primary state space model.
         std::vector<int> dynamic_regression_state_positions_;
+    };
+
+    class ScalarManagedModel : public ManagedModel {
+      public:
+        explicit ScalarManagedModel(
+            const ScalarStateSpaceSpecification *specification,
+            ModelOptions* options,
+            ScalarStateSpaceModelBase* sampling_model,
+            std::shared_ptr<PythonListIoManager> io_manager);
+
+        bool fit(const Vector &y,
+                 const Matrix &x = Matrix(),
+                 const std::vector<bool> &response_is_observed = std::vector<bool>()) override;
+        Matrix predict(const Matrix &x, const std::vector<int> &forecast_timestamps = std::vector<int>()) override;
+        virtual void AddData(
+          const Vector &response,
+          const Matrix &predictors,
+          const std::vector<bool> &response_is_observed) {};
+        virtual void AddData(const Vector &response, const std::vector<bool> &response_is_observed) {};
+
+
+        ScalarStateSpaceModelBase* sampling_model() const { return sampling_model_.get(); }
+        std::shared_ptr<StateSpaceModelBase> sampling_model_sharedptr() const { return sampling_model_; }
+        Vector SimulateForecast() override;
+
+      private:
+        std::shared_ptr<ScalarStateSpaceModelBase> sampling_model_;
+    };
+
+    class ModelManager {
+      public:
+        ModelManager();
+        virtual ~ModelManager() {}
+
+        void seed_rng(int seed) {
+          BOOM::GlobalRng::rng.seed(seed);
+          srand(seed);
+        }
+
+      protected:
+
+      private:
+
 
     };
 
@@ -125,11 +183,10 @@ namespace BOOM {
     class ScalarModelManager : public ModelManager {
       public:
         static ScalarModelManager* Create(const std::string &family_name, const int xdim);
-        ScalarStateSpaceModelBase* CreateModel(const ScalarStateSpaceSpecification *specification, const PyBstsOptions *options);
-        bool InitializeModel(const ScalarStateSpaceSpecification *specification, const PyBstsOptions *options);
-
-        bool fit(Matrix x, Vector y) override;
-        Matrix predict(Matrix x) override;
+        virtual ScalarManagedModel* CreateModel(
+            const ScalarStateSpaceSpecification *specification,
+            ModelOptions *options,
+            std::shared_ptr<PythonListIoManager> io_manager);
 
       private:
         // Create the specific StateSpaceModel suitable for the given model
@@ -144,11 +201,12 @@ namespace BOOM {
         //   A pointer to the created model.  The pointer is owned by a Ptr in the
         //   the child class, so working with the raw pointer privately is
         //   exception safe.
-        virtual ScalarStateSpaceModelBase * CreateObservationModel(const ScalarStateSpaceSpecification *specification) = 0;
+        virtual ScalarStateSpaceModelBase * CreateObservationModel(const ScalarStateSpaceSpecification *specification,
+            std::shared_ptr<PythonListIoManager> io_manager) = 0;
 
         virtual HoldoutErrorSampler CreateHoldoutSampler(
           const ScalarStateSpaceSpecification *specification,
-          const PyBstsOptions *options,
+          ModelOptions *options,
           const Vector& response,
           const Matrix& inputdata,
           const std::vector<bool> &response_is_observed,
@@ -156,12 +214,6 @@ namespace BOOM {
           int niter,
           bool standardize,
           Matrix *prediction_error_output) = 0;
-
-        // This function must not be called before UnpackForecastData.  It takes
-        // the current state of the model held by the child classes, along with
-        // the data obtained by UnpackForecastData(), and simulates one draw from
-        // the posterior predictive forecast distribution.
-       virtual Vector SimulateForecast(const Vector &final_state) = 0;
     };
 
     class StateSpaceSpecification {
@@ -170,60 +222,65 @@ namespace BOOM {
         virtual ~StateSpaceSpecification() {}
     };
 
-    class Season {
+    class SeasonSpecification {
     public:
-      explicit Season(int duration);
-      ~Season() {}
+      explicit SeasonSpecification(int number_of_seasons, int duration);
+      ~SeasonSpecification() {}
 
+      int number_of_seasons() const { return number_of_seasons_; }
+      int duration() const { return duration_; }
     private:
+      int number_of_seasons_;
       int duration_;
     };
 
-    class LocalTrend {
+    class LocalTrendSpecification {
     public:
-      explicit LocalTrend(bool has_intercept=false, bool has_trend=false,
-        bool has_slope=false, bool slope_has_bias=false, bool student_errors=false);
-      ~LocalTrend() {}
+      explicit LocalTrendSpecification();
+      explicit LocalTrendSpecification(
+        std::unique_ptr<PriorSpecification> trend_prior,
+        std::unique_ptr<PriorSpecification> slope_prior,
+        std::unique_ptr<PriorSpecification> slope_bias_prior,
+        std::unique_ptr<DoublePrior> trend_df_prior,
+        std::unique_ptr<DoublePrior> slope_df_prior,
+        std::unique_ptr<PriorSpecification> slope_ar1_prior,
+        bool static_intercept=false, bool student_errors=false);
+      ~LocalTrendSpecification() {}
 
-      bool has_intercept() const { return has_intercept_; }
-      bool has_trend() const { return has_trend_; }
-      bool has_slope() const { return has_slope_; }
-      bool slope_has_bias() const { return slope_has_bias_; }
+      std::shared_ptr<PriorSpecification> trend_prior() { return trend_prior_; }
+      std::shared_ptr<PriorSpecification> slope_prior() { return slope_prior_; }
+      std::shared_ptr<PriorSpecification> slope_bias_prior() { return slope_bias_prior_; }
+      std::shared_ptr<DoublePrior> trend_df_prior() { return trend_df_prior_; }
+      std::shared_ptr<DoublePrior> slope_df_prior() { return slope_df_prior_; }
+      std::shared_ptr<PriorSpecification> slope_ar1_prior() { return slope_ar1_prior_; }
+      bool static_intercept() const { return static_intercept_; }
       bool student_errors() const { return student_errors_; }
 
     private:
-      bool has_intercept_;
-      bool has_trend_;
-      bool has_slope_;
-      bool slope_has_bias_;
+      bool static_intercept_;
       bool student_errors_;
+      std::shared_ptr<PriorSpecification> trend_prior_;
+      std::shared_ptr<PriorSpecification> slope_prior_;
+      std::shared_ptr<PriorSpecification> slope_bias_prior_;
+      std::shared_ptr<DoublePrior> trend_df_prior_;
+      std::shared_ptr<DoublePrior> slope_df_prior_;
+      std::shared_ptr<PriorSpecification> slope_ar1_prior_;
+    };
+
+    class HierarchicalModelSpecification {
+      public:
+        HierarchicalModelSpecification(
+          std::unique_ptr<DoublePrior> sigma_mean_prior,
+          std::unique_ptr<DoublePrior> shrinkage_prior);
+        ~HierarchicalModelSpecification() {}
+
+        std::shared_ptr<DoublePrior> sigma_mean_prior() { return sigma_mean_prior_; }
+        std::shared_ptr<DoublePrior> shrinkage_prior() { return shrinkage_prior_; }
+      private:
+        std::shared_ptr<DoublePrior> sigma_mean_prior_;
+        std::shared_ptr<DoublePrior> shrinkage_prior_;
     };
     
-    class PriorSpecification {
-      public:
-        explicit PriorSpecification();
-        ~PriorSpecification() {}
-
-        const Vector &prior_inclusion_probabilities() const { return prior_inclusion_probabilities_; }
-        const Vector &prior_mean() const { return prior_mean_; }
-        const SpdMatrix &prior_precision() const { return prior_precision_; }
-        const Vector &prior_variance_diagonal() const { return prior_variance_diagonal_; }
-        int max_flips() const { return max_flips_; }
-        double prior_df() const { return prior_df_; }
-        double sigma_guess() const { return sigma_guess_; }
-        double sigma_upper_limit() const { return sigma_upper_limit_; }
-
-      private:
-        Vector prior_inclusion_probabilities_;
-        Vector prior_mean_;
-        SpdMatrix prior_precision_;
-        Vector prior_variance_diagonal_;
-        int max_flips_;
-        double prior_df_;
-        double sigma_guess_;
-        double sigma_upper_limit_;
-    };
-
     class OdaOptions {
       public:
         explicit OdaOptions(double eigenvalue_fudge_factor, double fallback_probability);
@@ -243,43 +300,66 @@ namespace BOOM {
         explicit ScalarStateSpaceSpecification();
         explicit ScalarStateSpaceSpecification(
           std::unique_ptr<PriorSpecification> sigma_prior,
-          std::unique_ptr<LocalTrend> local_trend);
+          std::unique_ptr<LocalTrendSpecification> local_trend);
         explicit ScalarStateSpaceSpecification(
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
-          std::unique_ptr<LocalTrend> local_trend,
-          int ar_order = 0);
+          std::unique_ptr<LocalTrendSpecification> local_trend,
+          const std::vector<std::string> &predictor_names = std::vector<std::string>(),
+          int ar_order = 0, bool dynamic_regression=false);
         explicit ScalarStateSpaceSpecification(
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
-          std::unique_ptr<LocalTrend> local_trend,
+          std::unique_ptr<LocalTrendSpecification> local_trend,
+          std::unique_ptr<PriorSpecification> ar_prior,
+          const std::vector<std::string> &predictor_names = std::vector<std::string>(),
+          bool dynamic_regression=false);
+        explicit ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> sigma_prior,
+          std::unique_ptr<PriorSpecification> predictors_prior,
+          std::unique_ptr<LocalTrendSpecification> local_trend,
           const std::string &bma_method, std::unique_ptr<OdaOptions> oda_options,
-          int ar_order = 0);
+          std::unique_ptr<HierarchicalModelSpecification> hierarchical_regression_specification,
+          const std::vector<std::string> &predictor_names = std::vector<std::string>(), int ar_order = 0,
+          bool dynamic_regression=false);
 
+        std::shared_ptr<PriorSpecification> initial_state_prior() const { return initial_state_prior_; }
         std::shared_ptr<PriorSpecification> sigma_prior() const { return sigma_prior_; }
         std::shared_ptr<PriorSpecification> predictors_prior() const { return predictors_prior_; }
         std::shared_ptr<OdaOptions> oda_options() const { return oda_options_; }
-        std::shared_ptr<LocalTrend> local_trend() const { return local_trend_; }
+        std::shared_ptr<LocalTrendSpecification> local_trend() const { return local_trend_; }
         const std::string bma_method() const { return bma_method_; }
+        int ar_order() const { return ar_order_; }
+        std::shared_ptr<PriorSpecification> ar_prior() const { return ar_prior_; }
+        bool dynamic_regression() const { return dynamic_regression_; }
+        std::shared_ptr<HierarchicalModelSpecification> hierarchical_regression_specification() const { return hierarchical_regression_specification_; }
+        std::vector<SeasonSpecification> seasons() const { return seasons_; }
+        std::vector<Date> holidays() const { return holidays_; }
+        std::vector<std::string> predictor_names() const { return predictor_names_; }
 
       private:
         std::shared_ptr<PriorSpecification> sigma_prior_;
         std::shared_ptr<PriorSpecification> initial_state_prior_;
         std::shared_ptr<PriorSpecification> predictors_prior_;
         int ar_order_;
+        std::shared_ptr<PriorSpecification> ar_prior_;
+        bool dynamic_regression_;
+        std::shared_ptr<HierarchicalModelSpecification> hierarchical_regression_specification_;
         std::string bma_method_;
         std::shared_ptr<OdaOptions> oda_options_;
-        std::vector<Season> seasons_;
+        std::vector<SeasonSpecification> seasons_;
         std::vector<bool> inclusion_probabilities_;
         std::vector<Date> holidays_;
-        std::shared_ptr<LocalTrend> local_trend_;
+        std::shared_ptr<LocalTrendSpecification> local_trend_;
+        std::vector<std::string> predictor_names_;
     };
 
-    class PyBstsOptions {
+    class ModelOptions {
       public:
-        explicit PyBstsOptions(bool save_state_contributions=false, bool save_full_state=false,
-          bool save_prediction_errors=false, int niter=100, int ping=1, double timeout_threshold_seconds=5.0);
-        ~PyBstsOptions() {}
+        explicit ModelOptions(bool save_state_contributions=false, bool save_full_state=false,
+          bool save_prediction_errors=false, int niter=100, int ping=10, int burn=0, int forecast_horizon = 1,
+          double timeout_threshold_seconds=5.0);
+        ~ModelOptions() {}
         const bool save_state_contributions() const { return save_state_contributions_; }
         const bool save_prediction_errors() const { return save_prediction_errors_; }
         const bool save_full_state() const { return save_full_state_; }
@@ -299,6 +379,91 @@ namespace BOOM {
         int forecast_horizon_;
         double timeout_threshold_seconds_;
     };
+
+
+    //======================================================================
+    // A callback class for computing the contribution of each state model
+    // (including a regression component if there is one) at each time
+    // point.
+    class ScalarStateContributionCallback
+        : public MatrixIoCallback {
+     public:
+      explicit ScalarStateContributionCallback(ScalarStateSpaceModelBase *model)
+          : model_(model),
+            has_regression_(-1) {}
+
+      int nrow() const override {
+        return model_->number_of_state_models() + has_regression();
+      }
+      int ncol() const override {return model_->time_dimension();}
+      BOOM::Matrix get_matrix() const override {
+        BOOM::Matrix ans(nrow(), ncol());
+        for (int state = 0; state < model_->number_of_state_models(); ++state) {
+          ans.row(state) = model_->state_contribution(state);
+        }
+        if (has_regression()) {
+          ans.last_row() = model_->regression_contribution();
+        }
+        return ans;
+      }
+
+      bool has_regression() const {
+        if (has_regression_ == -1) {
+          Vector regression_contribution = model_->regression_contribution();
+          has_regression_ = !regression_contribution.empty();
+        }
+        return has_regression_;
+      }
+
+     private:
+      ScalarStateSpaceModelBase *model_;
+      mutable int has_regression_;
+    };
+
+    //======================================================================
+    // A callback class for saving one step ahead prediction errors from
+    // the Kalman filter.
+    class PredictionErrorCallback : public VectorIoCallback {
+     public:
+      explicit PredictionErrorCallback(ScalarStateSpaceModelBase *model)
+          : model_(model) {}
+
+      // Each element is a vector of one step ahead prediction errors, so
+      // the dimension is the time dimension of the model.
+      int dim() const override {
+        return model_->time_dimension();
+      }
+
+      Vector get_vector() const override {
+        return model_->one_step_prediction_errors();
+      }
+
+     private:
+      ScalarStateSpaceModelBase *model_;
+    };
+
+    // A callback class for saving log likelihood values.
+    class LogLikelihoodCallback : public ScalarIoCallback {
+     public:
+      explicit LogLikelihoodCallback(ScalarStateSpaceModelBase *model)
+          : model_(model) {}
+      double get_value() const override {
+        return model_->log_likelihood();
+      }
+     private:
+      ScalarStateSpaceModelBase *model_;
+    };
+
+    class FullStateCallback : public MatrixIoCallback {
+     public:
+      explicit FullStateCallback(StateSpaceModelBase *model) : model_(model) {}
+      int nrow() const override {return model_->state_dimension();}
+      int ncol() const override {return model_->time_dimension();}
+      Matrix get_matrix() const override {return model_->state();}
+     private:
+      StateSpaceModelBase *model_;
+    };
+
 
   }  // namespace pybsts
 }  // namespace BOOM

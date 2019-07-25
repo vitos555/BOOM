@@ -22,11 +22,27 @@
 namespace BOOM {
 namespace pybsts {
 
-StateSpaceModel * StateSpaceModelManager::CreateObservationModel(const ScalarStateSpaceSpecification *specification) {
-  model_.reset(new StateSpaceModel);
+ScalarManagedModel* GaussianModelManagerBase::CreateModel(
+            const ScalarStateSpaceSpecification *specification,
+            ModelOptions *options,
+            std::shared_ptr<PythonListIoManager> io_manager) {
+  ScalarManagedModel* model = ScalarModelManager::CreateModel(specification, options, io_manager);
+
+  // It is only possible to compute log likelihood for Gaussian models.
+  io_manager->add_list_element(
+      new BOOM::NativeUnivariateListElement(
+          new LogLikelihoodCallback(model->sampling_model()),
+          "log.likelihood",
+          nullptr));
+  return model;
+}
+
+StateSpaceModel * StateSpaceModelManager::CreateObservationModel(const ScalarStateSpaceSpecification *specification,
+    std::shared_ptr<PythonListIoManager> io_manager) {
+  StateSpaceModel *sampling_model = new StateSpaceModel;
 
   if (specification->sigma_prior()) {
-    ZeroMeanGaussianModel *observation_model = model_->observation_model();
+    ZeroMeanGaussianModel *observation_model = sampling_model->observation_model();
     Ptr<ZeroMeanGaussianConjSampler> sigma_sampler(
         new ZeroMeanGaussianConjSampler(
             observation_model,
@@ -36,19 +52,24 @@ StateSpaceModel * StateSpaceModelManager::CreateObservationModel(const ScalarSta
     observation_model->set_method(sigma_sampler);
 
     Ptr<StateSpacePosteriorSampler> sampler(
-        new StateSpacePosteriorSampler(model_.get()));
+        new StateSpacePosteriorSampler(sampling_model));
 
-    model_->set_method(sampler);
+    sampling_model->set_method(sampler);
   } else {
     report_error("Empty sigma_prior in StateSpaceModelManager::CreateObservationModel.");
   }
 
-  return model_.get();
+  // Make the io_manager aware of the model parameters.
+  io_manager->add_list_element(new StandardDeviationListElement(
+      sampling_model->observation_model()->Sigsq_prm(),
+      "sigma.obs"));
+
+  return sampling_model;
 }
 
 HoldoutErrorSampler StateSpaceModelManager::CreateHoldoutSampler(
     const ScalarStateSpaceSpecification *specification,
-    const PyBstsOptions *options,
+    ModelOptions *options,
     const Vector& response,
     const Matrix& inputdata,
     const std::vector<bool> &response_is_observed,
@@ -56,13 +77,16 @@ HoldoutErrorSampler StateSpaceModelManager::CreateHoldoutSampler(
     int niter,
     bool standardize,
     Matrix *prediction_error_output) {
-  Ptr<StateSpaceModel> model = static_cast<StateSpaceModel *>(CreateModel(specification, options));
-  AddData(response, response_is_observed);
+  std::shared_ptr<PythonListIoManager> io_manager(new PythonListIoManager());
+  std::unique_ptr<StateSpaceManagedModel> model;
+  model.reset(static_cast<StateSpaceManagedModel*>(CreateModel(specification, options, io_manager)));
+  model->AddData(response, response_is_observed);
+  StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(model->sampling_model());
 
-  std::vector<Ptr<StateSpace::MultiplexedDoubleData>> data = model->dat();
-  model_->clear_data();
+  std::vector<Ptr<StateSpace::MultiplexedDoubleData>> data = sampling_model->dat();
+  sampling_model->clear_data();
   for (int i = 0; i <= cutpoint; ++i) {
-    model_->add_data(data[i]);
+    sampling_model->add_data(data[i]);
   }
   Vector holdout_data;
   for (int i = cutpoint + 1; i < data.size(); ++i) {
@@ -72,45 +96,43 @@ HoldoutErrorSampler StateSpaceModelManager::CreateHoldoutSampler(
     }
   }
   return HoldoutErrorSampler(new StateSpaceModelPredictionErrorSampler(
-      model, holdout_data, niter, standardize, prediction_error_output));
+      std::move(model), holdout_data, niter, standardize, prediction_error_output));
 }
 
 StateSpaceModelPredictionErrorSampler::StateSpaceModelPredictionErrorSampler(
-    const Ptr<StateSpaceModel> &model,
+    std::unique_ptr<StateSpaceManagedModel> model,
     const Vector &holdout_data,
     int niter,
     bool standardize,
     Matrix *errors)
-    : model_(model),
+    : model_(std::move(model)), 
       holdout_data_(holdout_data),
       niter_(niter),
       standardize_(standardize),
       errors_(errors)
-{}
-
-Vector StateSpaceModelManager::SimulateForecast(const Vector &final_state) {
-  return model_->simulate_forecast(rng(), forecast_horizon_, final_state);
-}
+{ }
 
 void StateSpaceModelPredictionErrorSampler::sample_holdout_prediction_errors() {
-  model_->sample_posterior();
-  errors_->resize(niter_, model_->time_dimension() + holdout_data_.size());
+  StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(model_->sampling_model());
+  sampling_model->sample_posterior();
+  errors_->resize(niter_, sampling_model->time_dimension() + holdout_data_.size());
   for (int i = 0; i < niter_; ++i) {
-    model_->sample_posterior();
-    Vector error_sim = model_->one_step_prediction_errors();
-    error_sim.concat(model_->one_step_holdout_prediction_errors(
-        holdout_data_, model_->final_state(), standardize_));
+    sampling_model->sample_posterior();
+    Vector error_sim = sampling_model->one_step_prediction_errors();
+    error_sim.concat(sampling_model->one_step_holdout_prediction_errors(
+        holdout_data_, sampling_model->final_state(), standardize_));
     errors_->row(i) = error_sim;
   }
 }
 
-void StateSpaceModelManager::AddData(
+void StateSpaceManagedModel::AddData(
     const Vector &response,
     const std::vector<bool> &response_is_observed) {
   if (!response_is_observed.empty()
       && (response.size() != response_is_observed.size())) {
     report_error("Vectors do not match in StateSpaceModelManager::AddData.");
   }
+  StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(this->sampling_model());
   std::vector<Ptr<StateSpace::MultiplexedDoubleData>> data;
   data.reserve(NumberOfTimePoints());
   for (int i = 0; i < NumberOfTimePoints(); ++i) {
@@ -127,8 +149,17 @@ void StateSpaceModelManager::AddData(
     if (data[i]->all_missing()) {
       data[i]->set_missing_status(Data::completely_missing);
     }
-    model_->add_data(data[i]);
+    sampling_model->add_data(data[i]);
   }
+
+}
+
+void StateSpaceManagedModel::AddData(
+        const Vector &response,
+        const Matrix &predictors,
+        const std::vector<bool> &response_is_observed)
+{
+  report_error("Wrong AddData method is used.");
 }
 
 }  // namespace pybsts

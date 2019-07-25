@@ -1,4 +1,5 @@
 import os
+import numpy
 from distutils.core import setup
 from distutils.extension import Extension
 
@@ -16,8 +17,10 @@ extensions = [Extension("pybsts",
      "bsts/state_space_gaussian_model_manager.cpp",
      "bsts/state_space_regression_model_manager.cpp",
      "bsts/prior_specification.cpp",
-     "bsts/spike_slab_prior.cpp"],
-    include_dirs=['../../'],
+     "bsts/spike_slab_prior.cpp",
+     "bsts/create_state_model.cpp",
+     "bsts/list_io.cpp"],
+    include_dirs=['../../', numpy.get_include()],
     language="c++",
     libraries=['c++'],
     library_dirs=[],

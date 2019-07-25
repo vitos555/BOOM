@@ -5,7 +5,7 @@
 #include "cpputil/math_utils.hpp"
 
 namespace BOOM {
-  namespace PythonInterface {
+  namespace pybsts {
 
     SpikeSlabGlmPrior::SpikeSlabGlmPrior(const Vector &prior_inclusion_probabilities,
           const Vector &prior_mean, const SpdMatrix &prior_precision, int max_flips)
@@ -98,5 +98,5 @@ namespace BOOM {
           df_prior_(df_prior_model)
     {}
 
-  }  // namespace PythonInterface
+  }  // namespace pybsts
 }  // namespace BOOM

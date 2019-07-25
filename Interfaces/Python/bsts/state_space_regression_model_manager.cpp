@@ -28,68 +28,98 @@
 namespace BOOM {
 namespace pybsts {
 
-namespace {
-typedef StateSpaceRegressionModelManager SSRMF;
-}  // namespace
+void DropUnforcedCoefficients(const Ptr<GlmModel> &glm,
+                              const BOOM::Vector &prior_inclusion_probs) {
+  glm->coef().drop_all();
+  for (int i = 0; i < prior_inclusion_probs.size(); ++i) {
+    if (prior_inclusion_probs[i] >= 1.0) {
+      glm->coef().add(i);
+    }
+  }
+}
+
+StateSpaceRegressionHoldoutErrorSampler::StateSpaceRegressionHoldoutErrorSampler(
+    std::unique_ptr<ScalarManagedModel> model,
+    const Vector &holdout_responses,
+    const Matrix &holdout_predictors,
+    int niter,
+    bool standardize,
+    Matrix *errors) :
+      model_(std::move(model)),
+      holdout_responses_(holdout_responses),
+      holdout_predictors_(holdout_predictors),
+      niter_(niter),
+      standardize_(standardize),
+      errors_(errors)
+{ }  
 
 StateSpaceRegressionModelManager::StateSpaceRegressionModelManager(int predictor_dimension)
     : predictor_dimension_(predictor_dimension) {}
 
-StateSpaceRegressionModel * SSRMF::CreateObservationModel(const ScalarStateSpaceSpecification *specification) {
+StateSpaceRegressionModel * StateSpaceRegressionModelManager::CreateObservationModel(
+    const ScalarStateSpaceSpecification *specification,
+    std::shared_ptr<PythonListIoManager> io_manager) {
    if (predictor_dimension_ < 0) {
     report_error("Negative value of predictor_dimension_ in "
                  "CreateObservationModel.");
   }
-  model_.reset(new StateSpaceRegressionModel(predictor_dimension_));
+  StateSpaceRegressionModel *sampling_model = new StateSpaceRegressionModel(predictor_dimension_);
 
   // A NULL priors signals that no posterior sampler is needed.
   if (specification->predictors_prior()) {
     if (specification->bma_method() == "SSVS") {
-      SetSsvsRegressionSampler(specification);
+      SetSsvsRegressionSampler(specification, sampling_model);
     } else if (specification->bma_method() == "ODA") {
-      SetOdaRegressionSampler(specification);
+      SetOdaRegressionSampler(specification, sampling_model);
     } else {
       std::ostringstream err;
       err << "Unrecognized value of bma_method: " << specification->bma_method();
-      BOOM::report_error(err.str());
+      report_error(err.str());
     }
     Ptr<StateSpacePosteriorSampler> sampler(
-        new StateSpacePosteriorSampler(model_.get()));
-    model_->set_method(sampler);
+        new StateSpacePosteriorSampler(sampling_model));
+    sampling_model->set_method(sampler);
   }
 
-  Ptr<RegressionModel> regression(model_->regression_model());
-  // io_manager->add_list_element(
-  //     new GlmCoefsListElement(regression->coef_prm(), "coefficients"));
-  // io_manager->add_list_element(
-  //     new StandardDeviationListElement(regression->Sigsq_prm(),
-  //                                      "sigma.obs"));
-  return model_.get();
+  Ptr<RegressionModel> regression(sampling_model->regression_model());
+  io_manager->add_list_element(
+      new GlmCoefsListElement(regression->coef_prm(), "coefficients"));
+  io_manager->add_list_element(
+      new StandardDeviationListElement(regression->Sigsq_prm(),
+                                       "sigma.obs"));
+  return sampling_model;
 }
 
-Vector SSRMF::SimulateForecast(const Vector &final_state) {
+Vector StateSpaceRegressionManagedModel::SimulateForecast() {
+  StateSpaceRegressionModel *sampling_model = static_cast<StateSpaceRegressionModel*>(this->sampling_model());
   if (ForecastTimestamps().empty()) {
-    return model_->simulate_forecast(rng(), forecast_predictors_, final_state);
+    return sampling_model->simulate_forecast(rng(), forecast_predictors_, final_state());
   } else {
-    return model_->simulate_multiplex_forecast(rng(),
+    return sampling_model->simulate_multiplex_forecast(rng(),
                                                forecast_predictors_,
-                                               final_state,
+                                               final_state(),
                                                ForecastTimestamps());
   }
 }
 
-void SSRMF::SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specification) {
-  BOOM::PythonInterface::RegressionConjugateSpikeSlabPrior prior(
+void StateSpaceRegressionManagedModel::update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) {
+  ManagedModel::update_forecast_predictors(x, forecast_timestamps);
+  forecast_predictors_ = x;
+}
+
+void StateSpaceRegressionModelManager::SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specification,
+    const StateSpaceRegressionModel *sampling_model) {
+  RegressionConjugateSpikeSlabPrior prior(
         specification->predictors_prior()->prior_inclusion_probabilities(),
         specification->predictors_prior()->prior_mean(), specification->predictors_prior()->prior_precision(),
         specification->predictors_prior()->max_flips(),
         specification->predictors_prior()->prior_df(), specification->predictors_prior()->sigma_guess(),
         specification->predictors_prior()->sigma_upper_limit(),
-      model_->regression_model()->Sigsq_prm());
-  DropUnforcedCoefficients(model_->regression_model(),
+      sampling_model->regression_model()->Sigsq_prm());
+  DropUnforcedCoefficients(sampling_model->regression_model(),
                            prior.prior_inclusion_probabilities());
   Ptr<BregVsSampler> sampler(new BregVsSampler(
-      model_->regression_model().get(),
+      sampling_model->regression_model().get(),
       prior.slab(),
       prior.siginv_prior(),
       prior.spike()));
@@ -97,16 +127,17 @@ void SSRMF::SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specif
   if (prior.max_flips() > 0) {
     sampler->limit_model_selection(prior.max_flips());
   }
-  model_->regression_model()->set_method(sampler);
+  sampling_model->regression_model()->set_method(sampler);
 }
 
-void SSRMF::SetOdaRegressionSampler(const ScalarStateSpaceSpecification *specification) {
-  BOOM::PythonInterface::IndependentRegressionSpikeSlabPrior prior(
+void StateSpaceRegressionModelManager::SetOdaRegressionSampler(const ScalarStateSpaceSpecification *specification,
+    const StateSpaceRegressionModel *sampling_model) {
+  IndependentRegressionSpikeSlabPrior prior(
           specification->predictors_prior()->prior_inclusion_probabilities(),
           specification->predictors_prior()->prior_mean(), specification->predictors_prior()->prior_variance_diagonal(),
           specification->predictors_prior()->max_flips(), specification->predictors_prior()->prior_df(),
           specification->predictors_prior()->sigma_guess(), specification->predictors_prior()->sigma_upper_limit(),
-      model_->regression_model()->Sigsq_prm());
+      sampling_model->regression_model()->Sigsq_prm());
   double eigenvalue_fudge_factor = 0.001;
   double fallback_probability = 0.0;
   if (specification->oda_options()) {
@@ -115,22 +146,30 @@ void SSRMF::SetOdaRegressionSampler(const ScalarStateSpaceSpecification *specifi
   }
   Ptr<SpikeSlabDaRegressionSampler> sampler(
       new SpikeSlabDaRegressionSampler(
-          model_->regression_model().get(),
+          sampling_model->regression_model().get(),
           prior.slab(),
           prior.siginv_prior(),
           prior.prior_inclusion_probabilities(),
           eigenvalue_fudge_factor,
           fallback_probability));
   sampler->set_sigma_upper_limit(prior.sigma_upper_limit());
-  DropUnforcedCoefficients(model_->regression_model(),
+  DropUnforcedCoefficients(sampling_model->regression_model(),
                            prior.prior_inclusion_probabilities());
-  model_->regression_model()->set_method(sampler);
+  sampling_model->regression_model()->set_method(sampler);
 }
 
-void StateSpaceRegressionModelManager::AddData(
+void StateSpaceRegressionManagedModel::AddData(
+    const Vector &response,
+    const std::vector<bool> &response_is_observed) {
+  report_error("Wrong AddData method is used.");
+}
+
+void StateSpaceRegressionManagedModel::AddData(
     const Vector &response,
     const Matrix &predictors,
     const std::vector<bool> &response_is_observed) {
+  StateSpaceRegressionModel *sampling_model = static_cast<StateSpaceRegressionModel*>(this->sampling_model());
+  predictors_ = predictors;
   if (nrow(predictors) != response.size()
       || response_is_observed.size() != response.size()) {
     std::ostringstream err;
@@ -147,38 +186,26 @@ void StateSpaceRegressionModelManager::AddData(
     if (!response_is_observed[i]) {
       dp->set_missing_status(Data::partly_missing);
     }
-    model_->add_regression_data(dp);
+    sampling_model->add_regression_data(dp);
   }
 }
-void StateSpaceRegressionModelManager::DropUnforcedCoefficients(const Ptr<GlmModel> &glm,
-                              const BOOM::Vector &prior_inclusion_probs) {
-  glm->coef().drop_all();
-  for (int i = 0; i < prior_inclusion_probs.size(); ++i) {
-    if (prior_inclusion_probs[i] >= 1.0) {
-      glm->coef().add(i);
-    }
-  }
-}
+void StateSpaceRegressionHoldoutErrorSampler::sample_holdout_prediction_errors() {
 
-namespace {
-typedef StateSpaceRegressionHoldoutErrorSampler ErrorSampler;
-}  // namespace
-
-void ErrorSampler::sample_holdout_prediction_errors() {
-  model_->sample_posterior();
-  errors_->resize(niter_, model_->time_dimension() + holdout_responses_.size());
+  StateSpaceRegressionModel *sampling_model = static_cast<StateSpaceRegressionModel*>(model_->sampling_model());
+  sampling_model->sample_posterior();
+  errors_->resize(niter_, sampling_model->time_dimension() + holdout_responses_.size());
   for (int i = 0; i < niter_; ++i) {
-    model_->sample_posterior();
-    Vector all_errors = model_->one_step_prediction_errors(standardize_);
-    all_errors.concat(model_->one_step_holdout_prediction_errors(
-        holdout_predictors_, holdout_responses_, model_->final_state(), standardize_));
+    sampling_model->sample_posterior();
+    Vector all_errors = sampling_model->one_step_prediction_errors(standardize_);
+    all_errors.concat(sampling_model->one_step_holdout_prediction_errors(
+        holdout_predictors_, holdout_responses_, sampling_model->final_state(), standardize_));
     errors_->row(i) = all_errors;
   }
 }
 
 HoldoutErrorSampler StateSpaceRegressionModelManager::CreateHoldoutSampler(
     const ScalarStateSpaceSpecification *specification,
-    const PyBstsOptions *options,
+    ModelOptions *options,
     const Vector& responses,
     const Matrix& predictors,
     const std::vector<bool> &response_is_observed,
@@ -186,21 +213,23 @@ HoldoutErrorSampler StateSpaceRegressionModelManager::CreateHoldoutSampler(
     int niter,
     bool standardize,
     Matrix *prediction_error_output) {
-  Ptr<StateSpaceRegressionModel> model =
-      static_cast<StateSpaceRegressionModel *>(CreateModel(specification, options));
-  AddData(responses, predictors, response_is_observed);
+  std::shared_ptr<PythonListIoManager> io_manager(new PythonListIoManager());
+  std::unique_ptr<StateSpaceRegressionManagedModel> model;
+  model.reset(static_cast<StateSpaceRegressionManagedModel*>(CreateModel(specification, options, io_manager)));
+  model->AddData(responses, predictors, response_is_observed);
 
-  std::vector<Ptr<StateSpace::MultiplexedRegressionData>> data = model->dat();
-  model->clear_data();
+  StateSpaceRegressionModel *sampling_model = static_cast<StateSpaceRegressionModel*>(model->sampling_model());
+  std::vector<Ptr<StateSpace::MultiplexedRegressionData>> data = sampling_model->dat();
+  sampling_model->clear_data();
   for (int i = 0; i <= cutpoint; ++i) {
-    model->add_multiplexed_data(data[i]);
+    sampling_model->add_multiplexed_data(data[i]);
   }
   int holdout_sample_size = 0;
   for (int i = cutpoint + 1; i < data.size(); ++i) {
     holdout_sample_size += data[i]->total_sample_size();
   }
   Matrix holdout_predictors(holdout_sample_size,
-                            model->observation_model()->xdim());
+                            sampling_model->observation_model()->xdim());
   Vector holdout_response(holdout_sample_size);
   int index = 0;
   for (int i = cutpoint + 1; i < data.size(); ++i) {
@@ -210,8 +239,8 @@ HoldoutErrorSampler StateSpaceRegressionModelManager::CreateHoldoutSampler(
       ++index;
     }
   }
-  return HoldoutErrorSampler(new ErrorSampler(
-      model, holdout_response, holdout_predictors,
+  return HoldoutErrorSampler(new StateSpaceRegressionHoldoutErrorSampler(
+      std::move(model), holdout_response, holdout_predictors,
       niter,
       standardize,
       prediction_error_output));

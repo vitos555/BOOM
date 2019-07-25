@@ -22,6 +22,7 @@
 #include "model_manager.hpp"
 #include "state_space_gaussian_model_manager.hpp"
 #include "state_space_regression_model_manager.hpp"
+#include "create_state_model.hpp"
 
 #include "Models/StateSpace/Filters/KalmanTools.hpp"
 #include "Models/StateSpace/StateModels/DynamicRegressionStateModel.hpp"
@@ -53,22 +54,25 @@ namespace BOOM {
 
   namespace pybsts {
 
+    ManagedModel::ManagedModel(ModelOptions *options,
+        std::shared_ptr<PythonListIoManager> io_manager) :
+      rng_(seed_rng(GlobalRng::rng)),
+      timestamps_are_trivial_(true),
+      number_of_time_points_(-1),
+      io_manager_(io_manager)
+    {
+      if (options) {
+        options_.reset(options);
+      } else {
+        report_error("Can't create model without options.");
+      }      
+    }
+
     // The model manager will be thread safe as long as it is created from the
     // home thread.
     ModelManager::ModelManager()
-        : rng_(seed_rng(GlobalRng::rng)),
-          timestamps_are_trivial_(true),
-          number_of_time_points_(-1) {}
+    {}
 
-    // ScalarModelManager * ScalarModelManager::Create(std::vector<std::string> py_bsts_object) {  
-    //   std::string family = ToString(getListElement(py_bsts_object, "family"));
-    //   bool regression = !Py_isNull(getListElement(py_bsts_object, "predictors"));
-    //   int xdim = 0;
-    //   if (regression) {
-    //     xdim = Py_ncols(getListElement(py_bsts_object, "predictors"));
-    //   }
-    //   return ScalarModelManager::Create(family, xdim);
-    // }
 
     ScalarModelManager *ScalarModelManager::Create(
         const std::string &family_name, int xdim) {
@@ -83,80 +87,104 @@ namespace BOOM {
       } else {
         std::ostringstream err;
         err << "Unrecognized family name: " << family_name
-            << " in ModelManager::Create.";
+            << " in ModelManager::Create." << endl;
         report_error(err.str());
       }
       return nullptr;
     }
 
-    ScalarStateSpaceModelBase* ScalarModelManager::CreateModel(
-        const ScalarStateSpaceSpecification *specification, 
-        const PyBstsOptions *options) {
-      ScalarStateSpaceModelBase* model = nullptr;
+    ScalarManagedModel* ScalarModelManager::CreateModel(
+        const ScalarStateSpaceSpecification *specification,
+        ModelOptions *options,
+        std::shared_ptr<PythonListIoManager> io_manager) {
+      ScalarManagedModel* model = nullptr;
       if (specification) {
-        model = CreateObservationModel(specification);
-      }
-      if (options) {
-        // Initialize state contributions vector
-        if (options->save_state_contributions()) {
-        }
-
-        // Initialize prediction errors vector
-        if (options->save_prediction_errors()) {
-        }
-
-        // Initialize full state vector
-        if (options->save_full_state()) {
-        }
-      }
-      return model;
-    }    
-
-    bool ScalarModelManager::InitializeModel(const ScalarStateSpaceSpecification *specification, 
-        const PyBstsOptions *options) {
-      bool ret = false;
-      if (specification) {
-        observation_model_.reset(CreateObservationModel(specification));
-        ret = true;
-      }
-      if (options) {
-        options_ = std::make_shared<PyBstsOptions>(options);
-
-        // Initialize state contributions vector
-        if (options_->save_state_contributions()) {
-        }
-
-        // Initialize prediction errors vector
-        if (options_->save_prediction_errors()) {
-        }
-
-        // Initialize full state vector
-        if (options_->save_full_state()) {
+        ScalarStateSpaceModelBase* sampling_model = CreateObservationModel(specification, io_manager);
+        if (!sampling_model) {
+          report_error("Error while creating an sampling model.");
+        } else {
+          model = new ScalarManagedModel(specification, options, sampling_model, io_manager);
         }
       } else {
-        ret = false;
+        report_error("Empty specification in ScalarModelManager::CreateModel.");
       }
-      return ret;
+      return model;
     }
 
-    bool ScalarModelManager::fit(Matrix x, Vector y) {
-      try {
+    ScalarManagedModel::ScalarManagedModel(
+            const ScalarStateSpaceSpecification *specification,
+            ModelOptions *input_options,
+            ScalarStateSpaceModelBase* input_sampling_model,
+            std::shared_ptr<PythonListIoManager> input_io_manager) :
+      ManagedModel(input_options, input_io_manager)
+    {
+      if (input_sampling_model) {
+        sampling_model_.reset(input_sampling_model);
+        StateModelFactory state_model_factory(io_manager());
+        state_model_factory.AddState(this, specification, "");
+        SetDynamicRegressionStateComponentPositions(
+            state_model_factory.DynamicRegressionStateModelPositions());
+        state_model_factory.SaveFinalState(sampling_model(), &final_state_);
+        // Initialize state contributions vector
+        if ((options()) && (io_manager())) {
+          if (options()->save_state_contributions()) {
+            io_manager()->add_list_element(
+                new NativeMatrixListElement(
+                    new ScalarStateContributionCallback(sampling_model()),
+                    "state.contributions",
+                    nullptr));
+          }
 
+          // Initialize prediction errors vector
+          if (options()->save_prediction_errors()) {
+            io_manager()->add_list_element(
+                new BOOM::NativeVectorListElement(
+                    new PredictionErrorCallback(sampling_model()),
+                    "one.step.prediction.errors",
+                    nullptr));          
+          }
+
+          // Initialize full state vector
+          if (options()->save_full_state()) {
+            io_manager()->add_list_element(
+                new NativeMatrixListElement(
+                    new FullStateCallback(sampling_model()), "full.state", nullptr));
+          }
+        }
+      } else {
+        report_error("Empty sampling_model in ScalarManagedModel::ScalarManagedModel.");
+      }
+    }
+
+    bool ScalarManagedModel::fit(const Vector &y, const Matrix &x, const std::vector<bool> &response_is_observed) {
+      try {
         // Do one posterior sampling step before getting ready to write.  This
         // will ensure that any dynamically allocated objects have the correct
         // size
-        observation_model_->sample_posterior();
-        int niter = options_->niter();
-        int ping = options_->ping();
-        double timeout_threshold_seconds = options_->timeout_threshold_seconds();
+        std::vector<bool> response_is_observed_;
+        if (!response_is_observed.empty()) {
+          response_is_observed_ = response_is_observed;
+        } else {
+          response_is_observed_ = std::vector<bool>(y.size(), true);
+        }
+        if (x.ncol() == 0) {
+          this->AddData(y, response_is_observed_);
+        } else {
+          this->AddData(y, x, response_is_observed_);
+        }
+        this->sampling_model()->sample_posterior();
+        int niter = this->options()->niter();
+        int ping = this->options()->ping();
+        double timeout_threshold_seconds = this->options()->timeout_threshold_seconds();
+        io_manager()->prepare_to_write(niter);
 
         clock_t start_time = clock();
         double time_threshold = CLOCKS_PER_SEC * timeout_threshold_seconds;
         for (int i = 0; i < niter; ++i) {
           BOOM::print_python_timestamp(i, ping);
           try {
-            observation_model_->sample_posterior();
-            // io_manager.write();
+            this->sampling_model()->sample_posterior();
+            io_manager()->write();
             clock_t current_time = clock();
             if (current_time - start_time > time_threshold) {
               std::ostringstream warning;
@@ -167,11 +195,7 @@ namespace BOOM {
                       << "Time used was "
                       << double(current_time - start_time) / CLOCKS_PER_SEC
                       << " seconds.";
-              std::cout << warning.str();
-              // return BOOM::appendListElement(
-              //     ans,
-              //     ToRVector(BOOM::Vector(1, i + 1)),
-              //     "ngood");
+              report_warning(warning.str());
             }
           } catch(std::exception &e) {
             std::ostringstream err;
@@ -179,37 +203,50 @@ namespace BOOM {
                 << "error message in MCMC "
                 << "iteration " << i << ".  Aborting." << std::endl
                 << e.what() << std::endl;
+            report_error(err.str());
           }
         }
       } catch (std::exception &e) {
-        std::cerr << "Got exception: " << e.what() << std::endl;
+        std::ostringstream err;
+        err << "Got exception: " << e.what() << std::endl;
+        report_error(err.str());
       } catch (...) {
-        std::cerr << "Got unknown exception" << std::endl;
+        std::ostringstream err;
+        err << "Got unknown exception" << std::endl;
+        report_error(err.str());
       }
       return true;
     }
 
-    // Primary implementation of predict.bsts.  Child classes will carry out
+    // Primary implementation of predict.  Child classes will carry out
     // some of the details, but most of the prediction logic is here.
-    Matrix ScalarModelManager::predict(Matrix x) {
-      Vector final_state = observation_model_->final_state();
-      int niter = options_->niter();
-      int burn = options_->burn();
-      int forecast_horizon = options_->forecast_horizon();
+    Matrix ScalarManagedModel::predict(const Matrix &x, const std::vector<int> &forecast_timestamps) {
+      int niter = this->options()->niter();
+      int burn = this->options()->burn();
+      int forecast_horizon = this->options()->forecast_horizon();
       int iterations_after_burnin = niter - burn;
-      int refilter = false;
+      bool refilter = false;
 
-      if (x.ncol() == 0) {
-        report_error("Forecast called with 0 columns of prediction data.");
+      if ((x.nrow() > 0) && (x.nrow() != forecast_timestamps.size())) {
+        report_error("Missmatch between number of rows in predictors and forecast indices.");
+      }
+
+      if (x.nrow() > 0) {
+        forecast_horizon = x.nrow();
+        this->update_forecast_predictors(x, forecast_timestamps);
+      }
+      io_manager()->prepare_to_stream();
+      if (burn > 0) {
+        io_manager()->advance(burn);
       }
 
       Matrix ans(iterations_after_burnin, forecast_horizon);
       for (int i = 0; i < iterations_after_burnin; ++i) {
-        // io_manager.stream();
+        io_manager()->stream();
         if (refilter) {
-          observation_model_->kalman_filter();
+          this->sampling_model()->kalman_filter();
           const Kalman::ScalarMarginalDistribution &marg(
-              observation_model_->get_filter().back());
+              this->sampling_model()->get_filter().back());
           Vector state_mean = marg.state_mean();
           SpdMatrix state_variance = marg.state_variance();
           make_contemporaneous(
@@ -217,134 +254,131 @@ namespace BOOM {
               state_variance,
               marg.prediction_variance(),
               marg.prediction_error(),
-              observation_model_->observation_matrix(observation_model_->time_dimension()).dense());
-          final_state = rmvn(state_mean, state_variance);
+              this->sampling_model()->observation_matrix(this->sampling_model()->time_dimension()).dense());
+          final_state_ = rmvn(state_mean, state_variance);
         }
-        ans.row(i) = SimulateForecast(final_state);
+        ans.row(i) = this->SimulateForecast();
       }
       return ans;
     }
 
-    // void ModelManager::UnpackDynamicRegressionForecastData(
-    //     StateSpaceModelBase *model,
-    //     std::vector<std::string> py_state_specification,
-    //     std::vector<std::string> py_prediction_data) {
-    //   if (Py_length(py_state_specification) < model->number_of_state_models()) {
-    //     std::ostringstream err;
-    //     err << "The number of state components in the model: ("
-    //         << model->number_of_state_models() << ") does not match the size of "
-    //         << "the state specification: ("
-    //         << Py_length(py_state_specification)
-    //         << ") in UnpackDynamicRegressionForecastData.";
-    //     report_error(err.str());
-    //   }
-    //   std::deque<int> positions(dynamic_regression_state_positions().begin(),
-    //                             dynamic_regression_state_positions().end());
-    //   for (int i = 0; i < model->number_of_state_models(); ++i) {
-    //     std::vector<std::string> spec = VECTOR_ELT(py_state_specification, i);
-    //     if (Py_inherits(spec, "DynamicRegression")) {
-    //       Matrix predictors = ToBoomMatrix(getListElement(
-    //           py_prediction_data, "dynamic.regression.predictors"));
-    //       if (positions.empty()) {
-    //         report_error("Found a previously unseen dynamic regression state "
-    //                      "component.");
-    //       }
-    //       int pos = positions[0];
-    //       positions.pop_front();
-    //       Ptr<StateModel> state_model = model->state_model(pos);
-    //       state_model.dcast<DynamicRegressionStateModel>()->add_forecast_data(
-    //           predictors);
-    //     }
-    //   }
-    // }
+    Vector ScalarManagedModel::SimulateForecast() 
+    {
+      StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(this->sampling_model());
+      return sampling_model->simulate_forecast(rng(), this->options()->forecast_horizon(), final_state());
+    }
 
-    // void ModelManager::UnpackTimestampInfo(std::vector<std::string> py_data_list) {
-    //   std::vector<std::string> py_timestamp_info = getListElement(py_data_list, "timestamp.info");
-    //   timestamps_are_trivial_ = Py_asLogical(getListElement(
-    //       py_timestamp_info, "timestamps.are.trivial"));
-    //   number_of_time_points_ = Py_asInteger(getListElement(
-    //       py_timestamp_info, "number.of.time.points"));
-    //   if (!timestamps_are_trivial_) {
-    //     timestamp_mapping_ = ToIntVector(getListElement(
-    //         py_timestamp_info, "timestamp.mapping"));
-    //   }
-    // }
-
-    // void ModelManager::UnpackForecastTimestamps(std::vector<std::string> py_prediction_data) {
-    //   std::vector<std::string> py_forecast_timestamps = getListElement(
-    //       py_prediction_data, "timestamps");
-    //   if (!Py_isNull(py_forecast_timestamps)) {
-    //     forecast_timestamps_ = ToIntVector(getListElement(
-    //         py_forecast_timestamps, "timestamp.mapping"));
-    //     for (int i = 1; i < forecast_timestamps_.size(); ++i) {
-    //       if (forecast_timestamps_[i] < forecast_timestamps_[i - 1]) {
-    //         report_error("Time stamps for multiplex predictions must be "
-    //                      "in increasing order.");
-    //       }
-    //     }
-    //   }
-    // }
-
-    Season::Season(int duration) : duration_(duration)
+    SeasonSpecification::SeasonSpecification(int number_of_seasons, int duration) : 
+      number_of_seasons_(number_of_seasons),
+      duration_(duration)
     {}
 
-    PyBstsOptions::PyBstsOptions(bool save_state_contributions, bool save_full_state,
-      bool save_prediction_errors, int niter, int ping, double timeout_threshold_seconds) : 
+    ModelOptions::ModelOptions(bool save_state_contributions, bool save_full_state,
+      bool save_prediction_errors, int niter, int ping, int burn, int forecast_horizon,
+      double timeout_threshold_seconds) : 
       save_state_contributions_(save_state_contributions), save_full_state_(save_full_state),
-      save_prediction_errors_(save_prediction_errors), niter_(niter), ping_(ping),
-      timeout_threshold_seconds_(timeout_threshold_seconds)
+      save_prediction_errors_(save_prediction_errors), niter_(niter), ping_(ping), burn_(burn),
+      forecast_horizon_(forecast_horizon), timeout_threshold_seconds_(timeout_threshold_seconds)
     {}
 
-    LocalTrend::LocalTrend(bool has_intercept, bool has_trend, bool has_slope, 
-        bool slope_has_bias, bool student_errors) : student_errors_(student_errors) {
-      if (has_intercept && (has_trend || has_slope || slope_has_bias)) {
-        std::ostringstream err;
-        err << "Incopatible local trend: can not have local intercept ond any other local trend";
-        report_error(err.str());
-      } else {
-        has_intercept_ = has_intercept;
-        has_trend_ = has_trend;
-        has_slope_ = has_slope;
-        slope_has_bias_ = slope_has_bias;
+    LocalTrendSpecification::LocalTrendSpecification() :
+      static_intercept_(false),
+      student_errors_(false)
+    {}
+
+
+    LocalTrendSpecification::LocalTrendSpecification(
+        std::unique_ptr<PriorSpecification> trend_prior,
+        std::unique_ptr<PriorSpecification> slope_prior,
+        std::unique_ptr<PriorSpecification> slope_bias_prior,
+        std::unique_ptr<DoublePrior> trend_df_prior,
+        std::unique_ptr<DoublePrior> slope_df_prior,
+        std::unique_ptr<PriorSpecification> slope_ar1_prior,
+        bool static_intercept, bool student_errors) : 
+      static_intercept_(static_intercept),
+      student_errors_(student_errors),
+      trend_prior_(std::move(trend_prior)),
+      slope_prior_(std::move(slope_prior)),
+      slope_bias_prior_(std::move(slope_bias_prior)),
+      trend_df_prior_(std::move(trend_df_prior)),
+      slope_df_prior_(std::move(slope_df_prior)),
+      slope_ar1_prior_(std::move(slope_ar1_prior_))
+    {
+      if (static_intercept_ && (trend_prior_ || slope_prior_ || slope_bias_prior_)) {
+        std::ostringstream warning;
+        warning << "Reseting intercept. Local trend can not have static intercept ond any other local trend";
+        report_warning(warning.str());
+        static_intercept_ = false;
       }
     }
 
-    OdaOptions::OdaOptions(double eigenvalue_fudge_factor, double fallback_probability) : eigenvalue_fudge_factor_(eigenvalue_fudge_factor), fallback_probability_(fallback_probability) 
+    HierarchicalModelSpecification::HierarchicalModelSpecification(
+          std::unique_ptr<DoublePrior> sigma_mean_prior,
+          std::unique_ptr<DoublePrior> shrinkage_prior) :
+      sigma_mean_prior_(std::move(sigma_mean_prior)),
+      shrinkage_prior_(std::move(shrinkage_prior))
+    {}
+
+    OdaOptions::OdaOptions(double eigenvalue_fudge_factor, double fallback_probability) : 
+      eigenvalue_fudge_factor_(eigenvalue_fudge_factor), fallback_probability_(fallback_probability) 
     {}
 
     StateSpaceSpecification::StateSpaceSpecification() {}
 
-    ScalarStateSpaceSpecification::ScalarStateSpaceSpecification() : ar_order_(0), bma_method_("ODA")
-    {
-      local_trend_ = std::make_shared<LocalTrend>(new LocalTrend());
-    }
+    ScalarStateSpaceSpecification::ScalarStateSpaceSpecification() : 
+      ar_order_(0), bma_method_("ODA"),
+      dynamic_regression_(false)
+    {}
 
     ScalarStateSpaceSpecification::ScalarStateSpaceSpecification(
       std::unique_ptr<PriorSpecification> sigma_prior,
-      std::unique_ptr<LocalTrend> local_trend
-      ) : 
-      sigma_prior_(std::move(sigma_prior)), local_trend_(std::move(local_trend)), ar_order_(0), bma_method_("ODA")
+      std::unique_ptr<LocalTrendSpecification> local_trend) : 
+      sigma_prior_(std::move(sigma_prior)), local_trend_(std::move(local_trend)), ar_order_(0), bma_method_("ODA"),
+      dynamic_regression_(false)
     {}
 
     ScalarStateSpaceSpecification::ScalarStateSpaceSpecification(
       std::unique_ptr<PriorSpecification> sigma_prior,
       std::unique_ptr<PriorSpecification> predictors_prior,
-      std::unique_ptr<LocalTrend> local_trend,
-      int ar_order) : 
+      std::unique_ptr<LocalTrendSpecification> local_trend,
+      const std::vector<std::string> &predictor_names,
+      int ar_order, bool dynamic_regression) : 
       sigma_prior_(std::move(sigma_prior)), predictors_prior_(std::move(predictors_prior)),
       ar_order_(ar_order), bma_method_("ODA"),
-      local_trend_(std::move(local_trend))
+      local_trend_(std::move(local_trend)),
+      predictor_names_(predictor_names),
+      dynamic_regression_(dynamic_regression)
     {}
+    
+    ScalarStateSpaceSpecification::ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> sigma_prior,
+          std::unique_ptr<PriorSpecification> predictors_prior,
+          std::unique_ptr<LocalTrendSpecification> local_trend,
+          std::unique_ptr<PriorSpecification> ar_prior,
+          const std::vector<std::string> &predictor_names,
+          bool dynamic_regression) : 
+      sigma_prior_(std::move(sigma_prior)), predictors_prior_(std::move(predictors_prior)),
+      ar_order_(-1), ar_prior_(std::move(ar_prior)), bma_method_("ODA"),
+      local_trend_(std::move(local_trend)),
+      predictor_names_(predictor_names),
+      dynamic_regression_(dynamic_regression)
+    {}
+
 
     ScalarStateSpaceSpecification::ScalarStateSpaceSpecification(
       std::unique_ptr<PriorSpecification> sigma_prior,
       std::unique_ptr<PriorSpecification> predictors_prior,
-      std::unique_ptr<LocalTrend> local_trend,
+      std::unique_ptr<LocalTrendSpecification> local_trend,
       const std::string &bma_method, std::unique_ptr<OdaOptions> oda_options,
-      int ar_order) : 
+      std::unique_ptr<HierarchicalModelSpecification> hierarchical_regression_specification,
+      const std::vector<std::string> &predictor_names,
+      int ar_order, bool dynamic_regression) : 
       sigma_prior_(std::move(sigma_prior)), predictors_prior_(std::move(predictors_prior)),
       ar_order_(ar_order), bma_method_(bma_method),
-      oda_options_(std::move(oda_options)), local_trend_(std::move(local_trend))
+      oda_options_(std::move(oda_options)), local_trend_(std::move(local_trend)),
+      hierarchical_regression_specification_(std::move(hierarchical_regression_specification)),
+      predictor_names_(predictor_names),
+      dynamic_regression_(dynamic_regression)
     {}
 
 

@@ -29,13 +29,20 @@ namespace pybsts {
 // non-regression flavors of Gaussian models.
 class GaussianModelManagerBase : public ScalarModelManager {
  public:
-  // ScalarStateSpaceModelBase * CreateModel(
-  //     SEXP r_data_list,
-  //     SEXP r_state_specification,
-  //     SEXP r_prior,
-  //     SEXP r_options,
-  //     Vector *final_state,
-  //     RListIoManager *io_manager) override;
+  ScalarManagedModel* CreateModel(
+            const ScalarStateSpaceSpecification *specification,
+            ModelOptions *options,
+            std::shared_ptr<PythonListIoManager> io_manager) override;  
+};
+
+class StateSpaceManagedModel : public ScalarManagedModel {
+  public:
+    void AddData(const Vector &response, const std::vector<bool> &response_is_observed) override;
+    void AddData(
+          const Vector &response,
+          const Matrix &predictors,
+          const std::vector<bool> &response_is_observed) override;
+  private:
 };
 
 // A holdout error sampler for a plain Gaussian state space model.
@@ -48,7 +55,7 @@ class StateSpaceModelPredictionErrorSampler
   //   niter: The desired number of draws (MCMC iterations) from the posterior
   //     distribution.
   //   errors:  A matrix that will hold the output of the simulation.
-  StateSpaceModelPredictionErrorSampler(const Ptr<StateSpaceModel> &model,
+  StateSpaceModelPredictionErrorSampler(std::unique_ptr<StateSpaceManagedModel> model,
                                         const Vector &holdout_data,
                                         int niter,
                                         bool standardize,
@@ -56,7 +63,7 @@ class StateSpaceModelPredictionErrorSampler
   void sample_holdout_prediction_errors() override;
 
  private:
-  Ptr<StateSpaceModel> model_;
+  std::unique_ptr<StateSpaceManagedModel> model_;
   Vector holdout_data_;
   int niter_;
   bool standardize_;
@@ -66,20 +73,12 @@ class StateSpaceModelPredictionErrorSampler
 class StateSpaceModelManager
     : public GaussianModelManagerBase {
  public:
-  // Creates the model_ object, assigns a PosteriorSamper, and
-  // allocates space in the io_manager for the objects in the
-  // observation model.
-  // Args:
-  //   r_data_list: Contains a numeric vector named 'response' and a
-  //     logical vector 'response.is.observed.'
-  //   r_prior:  An R object of class SdPrior.
-  //   r_options:  Not used.
-  //   io_manager:  The io_manager that will record the MCMC draws.
-  StateSpaceModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification) override;
+  StateSpaceModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification,
+    std::shared_ptr<PythonListIoManager> io_manager) override;
 
   HoldoutErrorSampler CreateHoldoutSampler(
     const ScalarStateSpaceSpecification *specification,
-    const PyBstsOptions *options,
+    ModelOptions *options,
     const Vector& response,
     const Matrix& inputdata,
     const std::vector<bool> &response_is_observed,
@@ -88,17 +87,8 @@ class StateSpaceModelManager
     bool standardize,
     Matrix *prediction_error_output) override;
 
-  // void AddDataFromBstsObject(SEXP r_bsts_object) override;
-  // void AddDataFromList(SEXP r_data_list) override;
-  // int UnpackForecastData(SEXP r_prediction_data) override;
-  Vector SimulateForecast(const Vector &final_state) override;
-
  private:
-  void AddData(const Vector &response,
-               const std::vector<bool> &response_is_observed);
 
-  Ptr<StateSpaceModel> model_;
-  int forecast_horizon_;
 };
 
 }  // namespace pybsts
