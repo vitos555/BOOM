@@ -22,18 +22,34 @@
 namespace BOOM {
 namespace pybsts {
 
-ScalarManagedModel* GaussianModelManagerBase::CreateModel(
-            const ScalarStateSpaceSpecification *specification,
+void GaussianModelManagerBase::init_io_manager(
+            ScalarStateSpaceModelBase* sampling_model,
             ModelOptions *options,
             std::shared_ptr<PythonListIoManager> io_manager) {
-  ScalarManagedModel* model = ScalarModelManager::CreateModel(specification, options, io_manager);
-
   // It is only possible to compute log likelihood for Gaussian models.
   io_manager->add_list_element(
       new BOOM::NativeUnivariateListElement(
-          new LogLikelihoodCallback(model->sampling_model()),
+          new LogLikelihoodCallback(sampling_model),
           "log.likelihood",
           nullptr));
+}
+
+ScalarManagedModel* StateSpaceModelManager::CreateModel(
+    const ScalarStateSpaceSpecification *specification,
+    ModelOptions *options,
+    std::shared_ptr<PythonListIoManager> io_manager) {
+  StateSpaceManagedModel* model = nullptr;
+  if (specification) {
+    ScalarStateSpaceModelBase* sampling_model = CreateObservationModel(specification, io_manager);
+    if (!sampling_model) {
+      report_error("Error while creating an sampling model.");
+    } else {
+      model = new StateSpaceManagedModel(specification, options, sampling_model, io_manager);
+    }
+    init_io_manager(sampling_model, options, io_manager);
+  } else {
+    report_error("Empty specification in StateSpaceManagedModel::CreateModel.");
+  }
   return model;
 }
 
@@ -42,6 +58,11 @@ StateSpaceModel * StateSpaceModelManager::CreateObservationModel(const ScalarSta
   StateSpaceModel *sampling_model = new StateSpaceModel;
 
   if (specification->sigma_prior()) {
+    std::ostringstream msg;
+    msg << "StateSpaceModelManager::CreateObservationModel: prior_df:" << std::setprecision(4) << specification->sigma_prior()->prior_df();
+    msg << ", sigma_guess: " << specification->sigma_prior()->sigma_guess();
+    msg << ", sigma_upper_limit: " << specification->sigma_prior()->sigma_upper_limit() << std::endl;
+    report_message(msg.str());
     ZeroMeanGaussianModel *observation_model = sampling_model->observation_model();
     Ptr<ZeroMeanGaussianConjSampler> sigma_sampler(
         new ZeroMeanGaussianConjSampler(
@@ -125,9 +146,17 @@ void StateSpaceModelPredictionErrorSampler::sample_holdout_prediction_errors() {
   }
 }
 
+StateSpaceManagedModel::StateSpaceManagedModel(const ScalarStateSpaceSpecification *specification,
+            ModelOptions* options,
+            ScalarStateSpaceModelBase* sampling_model,
+            std::shared_ptr<PythonListIoManager> io_manager) :
+    ScalarManagedModel(specification, options, sampling_model, io_manager)
+{}
+
 void StateSpaceManagedModel::AddData(
     const Vector &response,
-    const std::vector<bool> &response_is_observed) {
+    const std::vector<bool> &response_is_observed
+    ) {
   if (!response_is_observed.empty()
       && (response.size() != response_is_observed.size())) {
     report_error("Vectors do not match in StateSpaceModelManager::AddData.");
@@ -160,6 +189,16 @@ void StateSpaceManagedModel::AddData(
         const std::vector<bool> &response_is_observed)
 {
   report_error("Wrong AddData method is used.");
+}
+
+Vector StateSpaceManagedModel::SimulateForecast() {
+  StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(this->sampling_model());
+  return sampling_model->simulate_forecast(rng(), this->options()->forecast_horizon(), final_state());
+}
+
+void StateSpaceManagedModel::sample_posterior() {
+  StateSpaceModel *sampling_model = static_cast<StateSpaceModel*>(this->sampling_model());
+  sampling_model->sample_posterior();
 }
 
 }  // namespace pybsts

@@ -55,19 +55,26 @@
 #     }
 #   }
 import pybsts
+import numpy as np
 
 class CausalImpact:
   bsts = None
-  x = None
-  y = None
-  specification = {}
-  options = {}
 
-  def __init__(self, x, y, pre_interval, post_interval, seasons=[], dynamic_regression=False, niter=100):
-    self.data = data
-    self.specification = {"dynamic_regression": dynamic_regression, "seasons": seasons}
-    if dynamic_regression:
-      specification["sigma_mean_prior"] = {"mean": 1, "a":4}
-    self.options = {"niter": niter}
-    self.bsts = pybsts.PyBsts("gaussian", x.shape[1], self.specification, self.options)
+  def __init__(self, x, y, pre_interval, post_interval, seasons=[], dynamic_regression=False, niter=1000, standardize=False):
+    specification = {"dynamic_regression": dynamic_regression, "seasons": seasons, "local_trend": {"local_level": True}}
+    options = {"niter": niter, "ping": niter/10, "burn": niter/10}
+    self.bsts = pybsts.PyBsts("gaussian", x.shape[1], specification, options)
+
+  def standardize(y, fit_range=[]):
+    if not fit_range:
+      fit_range = range(0, len(y))
+    mu = np.mean(y[fit_range, :], axis=0)
+    sd = np.std(y[fit_range, :], ddof=1, axis=0)
+    y[fit_range, :] = y[fit_range, :] - mu
+    y[fit_range, sd > 0] = y[fit_range, sd > 0] / sd[sd > 0]
+    def unstandardize(y_):
+      y_[fit_range, sd > 0] = y_[fit_range, sd > 0] * sd[sd > 0]
+      y_[fit_range, :] = y_[fit_range, :] + mu
+      return y_
+    return (y, unstandardize)
 

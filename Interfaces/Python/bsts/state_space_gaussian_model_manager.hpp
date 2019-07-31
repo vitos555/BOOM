@@ -28,20 +28,26 @@ namespace pybsts {
 // A base class that handles "CreateModel" for both the regression and
 // non-regression flavors of Gaussian models.
 class GaussianModelManagerBase : public ScalarModelManager {
- public:
-  ScalarManagedModel* CreateModel(
-            const ScalarStateSpaceSpecification *specification,
+ protected:
+  virtual void init_io_manager(
+            ScalarStateSpaceModelBase* sampling_model,
             ModelOptions *options,
-            std::shared_ptr<PythonListIoManager> io_manager) override;  
+            std::shared_ptr<PythonListIoManager> io_manager);
 };
 
 class StateSpaceManagedModel : public ScalarManagedModel {
   public:
+    StateSpaceManagedModel(const ScalarStateSpaceSpecification *specification,
+            ModelOptions* options,
+            ScalarStateSpaceModelBase* sampling_model,
+            std::shared_ptr<PythonListIoManager> io_manager);
     void AddData(const Vector &response, const std::vector<bool> &response_is_observed) override;
     void AddData(
           const Vector &response,
           const Matrix &predictors,
           const std::vector<bool> &response_is_observed) override;
+    void sample_posterior() override;
+    Vector SimulateForecast() override;
   private:
 };
 
@@ -73,6 +79,10 @@ class StateSpaceModelPredictionErrorSampler
 class StateSpaceModelManager
     : public GaussianModelManagerBase {
  public:
+  ScalarManagedModel* CreateModel(
+    const ScalarStateSpaceSpecification *specification,
+    ModelOptions *options,
+    std::shared_ptr<PythonListIoManager> io_manager) override;
   StateSpaceModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification,
     std::shared_ptr<PythonListIoManager> io_manager) override;
 

@@ -26,7 +26,7 @@ extensions = [Extension("pybsts",
     library_dirs=[],
     extra_objects=['../../libboom.a'],
     extra_compile_args=['-std=c++11'],
-    extra_link_args=['-mmacosx-version-min=10.13'])]
+    extra_link_args=[])]
 
 if HAS_CYTHON:
     from Cython.Build import cythonize

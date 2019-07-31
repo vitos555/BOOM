@@ -78,7 +78,8 @@ namespace BOOM {
 
         virtual bool fit(const Vector &y,
                  const Matrix &x = Matrix(),
-                 const std::vector<bool> &response_is_observed = std::vector<bool>()) = 0;
+                 const std::vector<bool> &response_is_observed = std::vector<bool>(),
+                 const std::vector<int> &timestamp_indices = std::vector<int>()) = 0;
         virtual Matrix predict(const Matrix &x, const std::vector<int> &forecast_timestamps = std::vector<int>()) = 0;
         virtual Vector SimulateForecast() = 0;
 
@@ -105,6 +106,15 @@ namespace BOOM {
         std::shared_ptr<PythonListIoManager> io_manager_;
         virtual void update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) {
           forecast_timestamps_ = forecast_timestamps;
+        }
+        virtual void update_timestamp_mapping(const std::vector<int> &timestamp_mapping) {
+          timestamps_are_trivial_ = false;
+          timestamp_mapping_ = timestamp_mapping;
+          number_of_time_points_ = timestamp_mapping.size();
+        }
+        void update_number_of_trivial_timepoints(int size) {
+          timestamps_are_trivial_ = true;
+          number_of_time_points_ = size;
         }
 
       private:
@@ -145,18 +155,19 @@ namespace BOOM {
 
         bool fit(const Vector &y,
                  const Matrix &x = Matrix(),
-                 const std::vector<bool> &response_is_observed = std::vector<bool>()) override;
+                 const std::vector<bool> &response_is_observed = std::vector<bool>(),
+                 const std::vector<int> &timestamp_indices = std::vector<int>()) override;
         Matrix predict(const Matrix &x, const std::vector<int> &forecast_timestamps = std::vector<int>()) override;
         virtual void AddData(
           const Vector &response,
           const Matrix &predictors,
-          const std::vector<bool> &response_is_observed) {};
-        virtual void AddData(const Vector &response, const std::vector<bool> &response_is_observed) {};
+          const std::vector<bool> &response_is_observed) = 0;
+        virtual void AddData(const Vector &response, const std::vector<bool> &response_is_observed) = 0;
 
 
         ScalarStateSpaceModelBase* sampling_model() const { return sampling_model_.get(); }
+        virtual void sample_posterior() = 0;
         std::shared_ptr<StateSpaceModelBase> sampling_model_sharedptr() const { return sampling_model_; }
-        Vector SimulateForecast() override;
 
       private:
         std::shared_ptr<ScalarStateSpaceModelBase> sampling_model_;
@@ -166,11 +177,6 @@ namespace BOOM {
       public:
         ModelManager();
         virtual ~ModelManager() {}
-
-        void seed_rng(int seed) {
-          BOOM::GlobalRng::rng.seed(seed);
-          srand(seed);
-        }
 
       protected:
 
@@ -186,7 +192,7 @@ namespace BOOM {
         virtual ScalarManagedModel* CreateModel(
             const ScalarStateSpaceSpecification *specification,
             ModelOptions *options,
-            std::shared_ptr<PythonListIoManager> io_manager);
+            std::shared_ptr<PythonListIoManager> io_manager) = 0;
 
       private:
         // Create the specific StateSpaceModel suitable for the given model
@@ -224,7 +230,7 @@ namespace BOOM {
 
     class SeasonSpecification {
     public:
-      explicit SeasonSpecification(int number_of_seasons, int duration);
+      explicit SeasonSpecification(int number_of_seasons=1, int duration=1);
       ~SeasonSpecification() {}
 
       int number_of_seasons() const { return number_of_seasons_; }
@@ -283,7 +289,7 @@ namespace BOOM {
     
     class OdaOptions {
       public:
-        explicit OdaOptions(double eigenvalue_fudge_factor, double fallback_probability);
+        explicit OdaOptions(double eigenvalue_fudge_factor=0.01, double fallback_probability=0.0);
         ~OdaOptions() {}
 
         double eigenvalue_fudge_factor() const { return eigenvalue_fudge_factor_; }
@@ -299,15 +305,18 @@ namespace BOOM {
       public:
         explicit ScalarStateSpaceSpecification();
         explicit ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> initial_state_prior,
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<LocalTrendSpecification> local_trend);
         explicit ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> initial_state_prior,
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
           std::unique_ptr<LocalTrendSpecification> local_trend,
           const std::vector<std::string> &predictor_names = std::vector<std::string>(),
           int ar_order = 0, bool dynamic_regression=false);
         explicit ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> initial_state_prior,
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
           std::unique_ptr<LocalTrendSpecification> local_trend,
@@ -315,11 +324,14 @@ namespace BOOM {
           const std::vector<std::string> &predictor_names = std::vector<std::string>(),
           bool dynamic_regression=false);
         explicit ScalarStateSpaceSpecification(
+          std::unique_ptr<PriorSpecification> initial_state_prior,
           std::unique_ptr<PriorSpecification> sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
           std::unique_ptr<LocalTrendSpecification> local_trend,
           const std::string &bma_method, std::unique_ptr<OdaOptions> oda_options,
+          std::vector<SeasonSpecification> seasons,
           std::unique_ptr<HierarchicalModelSpecification> hierarchical_regression_specification,
+          std::unique_ptr<PriorSpecification> ar_prior=nullptr,
           const std::vector<std::string> &predictor_names = std::vector<std::string>(), int ar_order = 0,
           bool dynamic_regression=false);
 
@@ -464,7 +476,8 @@ namespace BOOM {
       StateSpaceModelBase *model_;
     };
 
-
+    void seed_rng_externally(int seed);
+    void seed_rng_with_timestamp();
   }  // namespace pybsts
 }  // namespace BOOM
 

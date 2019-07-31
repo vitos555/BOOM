@@ -81,8 +81,7 @@ namespace BOOM {
 
   std::string PythonListIoElement::repr() const {
     std::ostringstream msg;
-    msg << "PythonListIoElement:name:" << name() << endl;
-    msg << "PythonListIoElement:position:" << position_ << endl;
+    msg << "PythonListIoElement:name: " << name() << ", position: " << position_ << endl;
     return msg.str();
   }
 
@@ -97,7 +96,11 @@ namespace BOOM {
 
   std::string RealValuedPythonListIoElement::repr() const {
     std::ostringstream msg;
-    msg << "RealValuedPythonListIoElement:internal_data.size:" << internal_data_.size() << endl;
+    msg << name() << ":internal_data.size:" << internal_data_.size() << endl;
+    for (int i=0; i < internal_data_.size(); i++) {
+      msg << name() << ":element[" << i << "]: " << internal_data_[i] << endl; 
+    }
+    msg << endl;
     return PythonListIoElement::repr() + msg.str();
   }
 
@@ -159,6 +162,7 @@ namespace BOOM {
   void UnivariateListElement::stream() {
     prm_->set(data()[next_position()]);
   }
+
   //======================================================================
   StandardDeviationListElement::StandardDeviationListElement(
       const Ptr<UnivParams> &variance, const std::string &name)

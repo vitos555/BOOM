@@ -197,6 +197,7 @@ namespace BOOM {
     UnivariateListElement(const Ptr<UnivParams> &, const std::string &name);
     void write() override;
     void stream() override;
+    
    private:
     Ptr<UnivParams> prm_;
   };

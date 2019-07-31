@@ -56,6 +56,25 @@ StateSpaceRegressionHoldoutErrorSampler::StateSpaceRegressionHoldoutErrorSampler
 StateSpaceRegressionModelManager::StateSpaceRegressionModelManager(int predictor_dimension)
     : predictor_dimension_(predictor_dimension) {}
 
+ScalarManagedModel* StateSpaceRegressionModelManager::CreateModel(
+    const ScalarStateSpaceSpecification *specification,
+    ModelOptions *options,
+    std::shared_ptr<PythonListIoManager> io_manager) {
+  StateSpaceRegressionManagedModel* model = nullptr;
+  if (specification) {
+    ScalarStateSpaceModelBase* sampling_model = CreateObservationModel(specification, io_manager);
+    if (!sampling_model) {
+      report_error("Error while creating an sampling model.");
+    } else {
+      model = new StateSpaceRegressionManagedModel(specification, options, sampling_model, io_manager);
+    }
+    init_io_manager(sampling_model, options, io_manager);  
+  } else {
+    report_error("Empty specification in StateSpaceRegressionManagedModel::CreateModel.");
+  }
+  return model;
+}
+
 StateSpaceRegressionModel * StateSpaceRegressionModelManager::CreateObservationModel(
     const ScalarStateSpaceSpecification *specification,
     std::shared_ptr<PythonListIoManager> io_manager) {
@@ -105,6 +124,11 @@ Vector StateSpaceRegressionManagedModel::SimulateForecast() {
 void StateSpaceRegressionManagedModel::update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) {
   ManagedModel::update_forecast_predictors(x, forecast_timestamps);
   forecast_predictors_ = x;
+}
+
+void StateSpaceRegressionManagedModel::sample_posterior() {
+  StateSpaceRegressionModel *sampling_model = static_cast<StateSpaceRegressionModel*>(this->sampling_model());
+  sampling_model->sample_posterior();
 }
 
 void StateSpaceRegressionModelManager::SetSsvsRegressionSampler(const ScalarStateSpaceSpecification *specification,
@@ -157,6 +181,13 @@ void StateSpaceRegressionModelManager::SetOdaRegressionSampler(const ScalarState
                            prior.prior_inclusion_probabilities());
   sampling_model->regression_model()->set_method(sampler);
 }
+
+StateSpaceRegressionManagedModel::StateSpaceRegressionManagedModel(const ScalarStateSpaceSpecification *specification,
+            ModelOptions* options,
+            ScalarStateSpaceModelBase* sampling_model,
+            std::shared_ptr<PythonListIoManager> io_manager) :
+    ScalarManagedModel(specification, options, sampling_model, io_manager)
+{}
 
 void StateSpaceRegressionManagedModel::AddData(
     const Vector &response,

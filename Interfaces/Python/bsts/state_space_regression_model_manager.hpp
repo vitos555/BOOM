@@ -55,6 +55,10 @@ class StateSpaceRegressionHoldoutErrorSampler
 
 class StateSpaceRegressionManagedModel : public ScalarManagedModel {
   public:
+    StateSpaceRegressionManagedModel(const ScalarStateSpaceSpecification *specification,
+            ModelOptions* options,
+            ScalarStateSpaceModelBase* sampling_model,
+            std::shared_ptr<PythonListIoManager> io_manager);
     Vector SimulateForecast() override;
     void AddData(
       const Vector &response,
@@ -62,6 +66,7 @@ class StateSpaceRegressionManagedModel : public ScalarManagedModel {
       const std::vector<bool> &response_is_observed) override;
     void AddData(const Vector &response, const std::vector<bool> &response_is_observed) override;
     const Matrix& predictors() const { return predictors_; }
+    void sample_posterior() override;
 
   protected:
     void update_forecast_predictors(const Matrix &x, const std::vector<int> &forecast_timestamps) override;
@@ -75,6 +80,11 @@ class StateSpaceRegressionModelManager
     : public GaussianModelManagerBase {
   public:
     explicit StateSpaceRegressionModelManager(int predictor_dimension);
+
+    ScalarManagedModel* CreateModel(
+      const ScalarStateSpaceSpecification *specification,
+      ModelOptions *options,
+      std::shared_ptr<PythonListIoManager> io_manager) override;
 
     StateSpaceRegressionModel * CreateObservationModel(const ScalarStateSpaceSpecification *specification,
       std::shared_ptr<PythonListIoManager> io_manager) override;

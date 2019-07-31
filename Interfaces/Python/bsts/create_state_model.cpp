@@ -375,9 +375,15 @@ namespace BOOM {
     //======================================================================
     LocalLevelStateModel * StateModelFactory::CreateLocalLevel(
         const ScalarStateSpaceSpecification *specification, const std::string &prefix) {
+      if (!(specification->local_trend())) {
+        report_error("CreateLocalLevel: empty local_trend");
+      }
       std::shared_ptr<PriorSpecification> trend_prior = specification->local_trend()->trend_prior();
+      if (!trend_prior) {
+        report_error("CreateLocalLevel: empty local_trend.trend_prior");
+      }
       LocalLevelStateModel * level(
-          new LocalLevelStateModel(trend_prior->initial_value()));
+          new LocalLevelStateModel(trend_prior->prior_guess()));
 
       level->set_initial_state_variance(square(trend_prior->sigma_guess()));
       level->set_initial_state_mean(trend_prior->mu());
@@ -391,7 +397,7 @@ namespace BOOM {
         Ptr<ZeroMeanGaussianConjSampler> sampler(
             new ZeroMeanGaussianConjSampler(level,
                                             trend_prior->prior_df(),
-                                            trend_prior->sigma_guess()));
+                                            trend_prior->prior_guess()));
         if (trend_prior->sigma_upper_limit() > 0) {
           sampler->set_sigma_upper_limit(trend_prior->sigma_upper_limit());
         }
@@ -413,8 +419,17 @@ namespace BOOM {
       LocalLinearTrendStateModel * local_linear_trend(
           new LocalLinearTrendStateModel);
 
+      if (!(specification->local_trend())) {
+        report_error("CreateLocalLinearTrend: empty local_trend");
+      }
       std::shared_ptr<PriorSpecification> level_prior_spec = specification->local_trend()->trend_prior();
       std::shared_ptr<PriorSpecification> slope_prior_spec = specification->local_trend()->slope_prior();
+      if (!level_prior_spec) {
+        report_error("CreateLocalLinearTrend: empty local_trend.trend_prior");
+      }
+      if (!slope_prior_spec) {
+        report_error("CreateLocalLinearTrend: empty local_trend.slope_prior");
+      }
 
       Vector initial_state_mean(2);
       initial_state_mean[0] = level_prior_spec->mu();
@@ -430,8 +445,8 @@ namespace BOOM {
 
       // Set initial values of model parameters
       SpdMatrix Sigma = local_linear_trend->Sigma();
-      Sigma(0, 0) = square(level_prior_spec->initial_value());
-      Sigma(1, 1) = square(slope_prior_spec->initial_value());
+      Sigma(0, 0) = square(level_prior_spec->sigma_guess());
+      Sigma(1, 1) = square(slope_prior_spec->sigma_guess());
       Sigma(0, 1) = 0;
       Sigma(1, 0) = 0;
       local_linear_trend->set_Sigma(Sigma);
@@ -442,7 +457,7 @@ namespace BOOM {
       if (level_prior_spec->fixed()) {
         Ptr<FixedSpdSampler> sampler(
             new FixedSpdSampler(local_linear_trend->Sigma_prm(),
-                                square(level_prior_spec->initial_value()),
+                                square(level_prior_spec->sigma_guess()),
                                 pos));
         local_linear_trend->set_method(sampler);
       } else {
@@ -539,16 +554,35 @@ namespace BOOM {
       StudentLocalLinearTrendStateModel * robust_local_linear_trend(
           new StudentLocalLinearTrendStateModel(1, 10, 1, 10));
 
+      if (!(specification->local_trend())) {
+        report_error("CreateStudentLocalLinearTrend: empty local_trend");
+      }
+
       //----------------------------------------------------------------------
       // Unpack the prior and create the posterior sampler.
       std::shared_ptr<PriorSpecification> level_prior_spec = specification->local_trend()->trend_prior();
+      std::shared_ptr<PriorSpecification> slope_prior_spec = specification->local_trend()->slope_prior();
+      if (!level_prior_spec) {
+        report_error("CreateStudentLocalLinearTrend: empty local_trend.trend_prior");
+      }
+      if (!slope_prior_spec) {
+        report_error("CreateStudentLocalLinearTrend: empty local_trend.slope_prior");
+      }
+
       NEW(ChisqModel, level_sigma_prior)(
           level_prior_spec->prior_df(),
           level_prior_spec->prior_guess());
-      std::shared_ptr<PriorSpecification> slope_prior_spec = specification->local_trend()->slope_prior();
       NEW(ChisqModel, slope_sigma_prior)(
           slope_prior_spec->prior_df(),
           slope_prior_spec->prior_guess());
+
+      if (!specification->local_trend()->trend_df_prior()) {
+        report_error("CreateStudentLocalLinearTrend: empty local_trend.trend_df_prior");
+      }
+      if (!specification->local_trend()->slope_df_prior()) {
+        report_error("CreateStudentLocalLinearTrend: empty local_trend.slope_df_prior");
+      }
+
       Ptr<DoubleModel> level_nu_prior(create_double_model(specification->local_trend()->trend_df_prior()));
       Ptr<DoubleModel> slope_nu_prior(create_double_model(specification->local_trend()->slope_df_prior()));
 
@@ -620,6 +654,9 @@ namespace BOOM {
         const std::string &prefix) {
       StaticInterceptStateModel *intercept = new StaticInterceptStateModel;
       std::shared_ptr<PriorSpecification> initial_state_prior = specification->initial_state_prior();
+      if (!initial_state_prior) {
+        report_error("CreateStaticIntercept: empty initial_state_prior");
+      }
       intercept->set_initial_state_mean(initial_state_prior->mu());
       intercept->set_initial_state_variance(initial_state_prior->sigma_guess());
       return intercept;
@@ -707,15 +744,31 @@ namespace BOOM {
     StateModelFactory::CreateSemilocalLinearTrend(const ScalarStateSpaceSpecification *specification,
       const std::string &prefix) {
 
+      if (!(specification->local_trend())) {
+        report_error("CreateSemilocalLinearTrend: empty local_trend");
+      }
+
       std::shared_ptr<PriorSpecification> level_prior_spec = specification->local_trend()->trend_prior();
-      NEW(ZeroMeanGaussianModel, level)(level_prior_spec->initial_value());
+      if (!level_prior_spec) {
+        report_error("CreateSemilocalLinearTrend: empty local_trend.trend_prior");
+      }
+      NEW(ZeroMeanGaussianModel, level)(level_prior_spec->prior_guess());
 
       std::shared_ptr<PriorSpecification> slope_mean_prior_spec = specification->local_trend()->slope_bias_prior();
       std::shared_ptr<PriorSpecification> slope_ar1_prior_spec = specification->local_trend()->slope_ar1_prior();
       std::shared_ptr<PriorSpecification> slope_prior_spec = specification->local_trend()->slope_prior();
+      if (!slope_mean_prior_spec) {
+        report_error("CreateSemilocalLinearTrend: empty local_trend.slope_bias_prior");
+      }
+      if (!slope_ar1_prior_spec) {
+        report_error("CreateSemilocalLinearTrend: empty local_trend.slope_ar1_prior");
+      }
+      if (!slope_prior_spec) {
+        report_error("CreateSemilocalLinearTrend: empty local_trend.slope_prior");
+      }
       
-      NEW(NonzeroMeanAr1Model, slope)(slope_mean_prior_spec->initial_value(),
-                                      slope_ar1_prior_spec->initial_value(),
+      NEW(NonzeroMeanAr1Model, slope)(slope_mean_prior_spec->mu(),
+                                      slope_ar1_prior_spec->mu(),
                                       slope_prior_spec->sigma_guess());
 
       SemilocalLinearTrendStateModel *trend
@@ -927,9 +980,16 @@ namespace BOOM {
     SeasonalStateModel * StateModelFactory::CreateSeasonal(const ScalarStateSpaceSpecification *specification,
         SeasonSpecification* season, const std::string &prefix) {
 
+      if (!season) {
+        report_error("CreateSeasonal: empty season");
+      }
+
       int nseasons = season->number_of_seasons();
       int season_duration = season->duration();
       std::shared_ptr<PriorSpecification> prior_spec = specification->sigma_prior();
+      if (!prior_spec) {
+        report_error("CreateSeasonal: empty sigma_prior");
+      }
 
       SeasonalStateModel * seasonal(
           new SeasonalStateModel(nseasons, season_duration));
@@ -1192,6 +1252,9 @@ namespace BOOM {
         const ScalarStateSpaceSpecification *specification,
         const std::string &prefix) {
       std::shared_ptr<PriorSpecification> sigma = specification->sigma_prior();
+      if (!sigma) {
+        report_error("CreateArStateModel: empty sigma_prior");
+      }
       int number_of_lags = specification->ar_order();
       ArStateModel *state_model(new ArStateModel(number_of_lags));
 
@@ -1228,6 +1291,9 @@ namespace BOOM {
       int number_of_lags = specification->ar_order();
       ArStateModel *state_model(new ArStateModel(number_of_lags));
       std::shared_ptr<PriorSpecification> ar_prior = specification->ar_prior();
+      if (!ar_prior) {
+        report_error("CreateAutoArStateModel: empty ar_prior");
+      }
       ArSpikeSlabPrior prior_spec(ar_prior->prior_inclusion_probabilities(),
           ar_prior->prior_mean(), ar_prior->prior_precision(), ar_prior->max_flips(),
           ar_prior->prior_df(), ar_prior->prior_guess(), ar_prior->sigma_upper_limit(),
@@ -1417,8 +1483,18 @@ namespace BOOM {
         const ScalarStateSpaceSpecification *specification,
         StateSpaceRegressionManagedModel *model,
         const std::string &prefix) {
+      if (!model) {
+        report_error("CreateDynamicRegressionStateModel: empty model");
+      }
+      if (!(model->sampling_model())) {
+        report_error("CreateDynamicRegressionStateModel: empty sampling_model");
+      }
+
       IdentifyDynamicRegression(model->sampling_model()->number_of_state_models());
       Matrix predictors = model->predictors();
+      if (predictors.ncol()==0) {
+        report_error("CreateDynamicRegressionStateModel: empty predictors");
+      }
 
       std::vector<std::string> xnames = specification->predictor_names();
       if (xnames.empty()) {
@@ -1465,10 +1541,18 @@ namespace BOOM {
         const ScalarStateSpaceSpecification *specification,
         StateSpaceRegressionManagedModel *model,
         const std::string &prefix) {
-
+      if (!model) {
+        report_error("CreateDynamicRegressionArStateModel: empty model");
+      }
+      if (!model->sampling_model()) {
+        report_error("CreateDynamicRegressionArStateModel: empty sampling_model");
+      }
       IdentifyDynamicRegression(model->sampling_model()->number_of_state_models());
 
       Matrix predictors = model->predictors();
+      if (predictors.ncol()==0) {
+        report_error("CreateDynamicRegressionArStateModel: empty predictors");
+      }
       std::vector<std::string> xnames =
           specification->predictor_names();
       if (xnames.empty()) {
@@ -1488,6 +1572,9 @@ namespace BOOM {
 
       // Set the prior and the posterior sampler.
       std::shared_ptr<PriorSpecification> sigma_prior = specification->sigma_prior();
+      if (!sigma_prior) {
+        report_error("CreateDynamicRegressionArStateModel: empty sigma_prior");
+      }
       std::vector<Ptr<GammaModelBase>> siginv_priors;
       siginv_priors.reserve(ncol(predictors));
       for (int i = 0; i < ncol(predictors); ++i) {
