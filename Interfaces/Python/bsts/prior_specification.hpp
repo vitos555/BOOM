@@ -419,7 +419,8 @@ namespace BOOM{
       //     regression model described by the prior.
       RegressionConjugateSpikeSlabPrior(
         const Vector &prior_inclusion_probabilities,
-        const Vector &prior_mean, const SpdMatrix &prior_precision, int max_flips,
+        const Vector &prior_mean, const SpdMatrix &prior_precision, 
+        const Vector &prior_variance_diagonal, int max_flips,
         double prior_df, double sigma_guess, double sigma_upper_limit,
         const Ptr<UnivParams> &residual_variance);
       const Vector &prior_inclusion_probabilities() {
@@ -447,7 +448,8 @@ namespace BOOM{
       public:
        StudentRegressionConjugateSpikeSlabPrior(
         const Vector &prior_inclusion_probabilities,
-        const Vector &prior_mean, const SpdMatrix &prior_precision, int max_flips,
+        const Vector &prior_mean, const SpdMatrix &prior_precision, 
+        const Vector &prior_variance_diagonal, int max_flips,
         double prior_df, double sigma_guess, double sigma_upper_limit,
         Ptr<DoubleModel> df_prior_model, const Ptr<UnivParams> &residual_variance);
        Ptr<DoubleModel> degrees_of_freedom_prior() {return df_prior_;}

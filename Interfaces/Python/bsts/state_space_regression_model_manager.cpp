@@ -136,8 +136,8 @@ void StateSpaceRegressionModelManager::SetSsvsRegressionSampler(const ScalarStat
   RegressionConjugateSpikeSlabPrior prior(
         specification->predictors_prior()->prior_inclusion_probabilities(),
         specification->predictors_prior()->prior_mean(), specification->predictors_prior()->prior_precision(),
-        specification->predictors_prior()->max_flips(),
-        specification->predictors_prior()->prior_df(), specification->predictors_prior()->sigma_guess(),
+        specification->predictors_prior()->prior_variance_diagonal(), specification->predictors_prior()->max_flips(),
+        specification->predictors_prior()->prior_df(), specification->predictors_prior()->prior_guess(),
         specification->predictors_prior()->sigma_upper_limit(),
       sampling_model->regression_model()->Sigsq_prm());
   DropUnforcedCoefficients(sampling_model->regression_model(),

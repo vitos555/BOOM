@@ -22,10 +22,10 @@ extensions = [Extension("pybsts",
      "bsts/list_io.cpp"],
     include_dirs=['../../', numpy.get_include()],
     language="c++",
-    libraries=['c++'],
+    libraries=[],
     library_dirs=[],
     extra_objects=['../../libboom.a'],
-    extra_compile_args=['-std=c++11'],
+    extra_compile_args=['-std=c++11', '-DADD_'],
     extra_link_args=[])]
 
 if HAS_CYTHON:
@@ -39,4 +39,5 @@ setup(
     description="Python interface to Bayesian Structured Time Series",
     version='0.0.1',
     ext_modules=extensions,
+    py_modules=['causal_impact']
 )

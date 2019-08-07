@@ -59,7 +59,7 @@ StateSpaceModel * StateSpaceModelManager::CreateObservationModel(const ScalarSta
 
   if (specification->sigma_prior()) {
     std::ostringstream msg;
-    msg << "StateSpaceModelManager::CreateObservationModel: prior_df:" << std::setprecision(4) << specification->sigma_prior()->prior_df();
+    msg << "StateSpaceModelManager::CreateObservationModel: prior_df:" << std::setprecision(22) << specification->sigma_prior()->prior_df();
     msg << ", sigma_guess: " << specification->sigma_prior()->sigma_guess();
     msg << ", sigma_upper_limit: " << specification->sigma_prior()->sigma_upper_limit() << std::endl;
     report_message(msg.str());

@@ -17,16 +17,22 @@ namespace BOOM {
 
     RegressionConjugateSpikeSlabPrior::RegressionConjugateSpikeSlabPrior(
         const Vector &prior_inclusion_probabilities,
-        const Vector &prior_mean, const SpdMatrix &prior_precision, int max_flips,
+        const Vector &prior_mean, const SpdMatrix &prior_precision, 
+        const Vector &prior_variance_diagonal, int max_flips,
         double prior_df, double sigma_guess, double sigma_upper_limit,
         const Ptr<UnivParams> &residual_variance)
         : prior_inclusion_probabilities_(prior_inclusion_probabilities),
           spike_(new VariableSelectionPrior(prior_inclusion_probabilities_)),
-          slab_(new MvnGivenScalarSigma(prior_mean, prior_precision, residual_variance)),
           siginv_prior_(new ChisqModel(prior_df, sigma_guess)),
           max_flips_(max_flips),
           sigma_upper_limit_(sigma_upper_limit)
-    {}
+    {
+      if (prior_variance_diagonal.size() > 0) {
+        slab_.reset(new IndependentMvnModelGivenScalarSigma(prior_mean, prior_variance_diagonal, residual_variance));
+      } else {
+        slab_.reset(new MvnGivenScalarSigma(prior_mean, prior_precision, residual_variance));
+      }
+    }
 
     namespace {
       typedef StudentRegressionConjugateSpikeSlabPrior SRCSSP;
@@ -35,12 +41,13 @@ namespace BOOM {
     }
 
     SRCSSP::StudentRegressionConjugateSpikeSlabPrior(const Vector &prior_inclusion_probabilities,
-        const Vector &prior_mean, const SpdMatrix &prior_precision, int max_flips,
+        const Vector &prior_mean, const SpdMatrix &prior_precision, 
+        const Vector &prior_variance_diagonal, int max_flips,
         double prior_df, double sigma_guess, double sigma_upper_limit,
         Ptr<DoubleModel> df_prior_model, const Ptr<UnivParams> &residual_variance
         )
         : RegressionConjugateSpikeSlabPrior(prior_inclusion_probabilities,
-            prior_mean, prior_precision, max_flips, 
+            prior_mean, prior_precision, prior_variance_diagonal, max_flips, 
             prior_df, sigma_guess, sigma_upper_limit, residual_variance),
           df_prior_(df_prior_model)
     {}

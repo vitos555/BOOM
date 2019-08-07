@@ -30,6 +30,7 @@ cdef extern from "LinAlg/Matrix.hpp" namespace "BOOM":
     cdef cppclass Matrix:
         Matrix() except +
         Matrix(int ncols, int nrows, const double *data) except +
+        Matrix(int ncols, int nrows, const double *data, bool by_row) except +
         int ncol()
         int nrow()
         double * data()
@@ -41,6 +42,9 @@ cdef extern from "LinAlg/SpdMatrix.hpp" namespace "BOOM":
         int dim()
         double * data()
 
+cdef extern from "cpputil/math_utils.hpp" namespace "BOOM":
+    cdef double infinity()
+
 cdef extern from "Models/StateSpace/StateSpaceModelBase.hpp" namespace "BOOM":
     cdef cppclass ScalarStateSpaceModelBase
 
@@ -49,6 +53,7 @@ cdef extern from "list_io.hpp" namespace "BOOM":
     cdef cppclass PythonListIoManager:
         PythonListIoManager() except +
         string repr() except +
+        Vector results(string name) except +
 
 
 cdef extern from "prior_specification.hpp" namespace "BOOM::pybsts":
@@ -75,10 +80,11 @@ cdef extern from "prior_specification.hpp" namespace "BOOM::pybsts":
 
 
 cdef extern from "model_manager.hpp" namespace "BOOM::pybsts":
-    void seed_rng_externally(int seed) except +
-    void seed_rng_with_timestamp() except +
+    void seed_global_rng(int seed) except +
 
     cdef cppclass ScalarManagedModel:
+        void seed_internal_rng(int seed) except +
+        void seed_internal_rng() except +
         bool fit(Vector y, Matrix x) except +
         bool fit(Vector y, Matrix x, vector[bool] response_is_observed) except +
         bool fit(Vector y, Matrix x, vector[bool] response_is_observed, vector[int] timestamp_indices) except +

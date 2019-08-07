@@ -164,7 +164,7 @@ namespace BOOM {
           AddData(y, x, response_is_observed_);
         }
         sample_posterior();
-        int niter =options()->niter();
+        int niter = options()->niter();
         int ping = options()->ping();
         double timeout_threshold_seconds = options()->timeout_threshold_seconds();
         io_manager()->prepare_to_write(niter);
@@ -252,26 +252,6 @@ namespace BOOM {
       }
       return ans;
     }
-    // void ScalarManagedModel::AddData(
-    //   const Vector &response,
-    //   const Matrix &predictors,
-    //   const std::vector<bool> &response_is_observed) {
-    //   report_error("Calling wrong AddData.");
-    // }
-
-    // void ScalarManagedModel::AddData(const Vector &response, const std::vector<bool> &response_is_observed) {
-    //   report_error("Calling wrong AddData.");
-    // }
-
-    // void ScalarManagedModel::sample_posterior() {
-    //   report_error("Calling wrong sample_posterior");
-    // }
-
-    // Vector ScalarManagedModel::SimulateForecast() 
-    // {
-    //   report_error("Calling wrong SimulateForecast");
-    //   return Vector();
-    // }
 
     SeasonSpecification::SeasonSpecification(int number_of_seasons, int duration) : 
       number_of_seasons_(number_of_seasons),
@@ -397,11 +377,11 @@ namespace BOOM {
       dynamic_regression_(dynamic_regression)
     {}
 
-    void seed_rng_externally(int seed) {
+    void seed_global_rng(int seed) {
       BOOM::GlobalRng::rng.seed(seed);
       srand(seed);
     }
-    void seed_rng_with_timestamp() {
+    void seed_global_rng() {
       BOOM::GlobalRng::rng.seed();
     }
 

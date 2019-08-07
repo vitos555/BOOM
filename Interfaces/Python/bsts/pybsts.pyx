@@ -1,7 +1,8 @@
 from model_manager cimport ScalarModelManager, ScalarManagedModel, PythonListIoManager, \
     ScalarStateSpaceSpecification, ModelOptions, LocalTrendSpecification, Matrix, Vector, \
     OdaOptions, SeasonSpecification, DoublePrior, PriorSpecification, \
-    HierarchicalModelSpecification, move, SpdMatrix, seed_rng_externally, seed_rng_with_timestamp
+    HierarchicalModelSpecification, move, SpdMatrix, \
+    seed_global_rng, infinity
 from libcpp cimport bool
 from libcpp.string cimport string
 from libcpp.memory cimport unique_ptr, shared_ptr
@@ -33,11 +34,11 @@ cdef bytes _bytes(s):
 cdef np.ndarray[double, ndim=2] matrix_to_nparray(Matrix x) except +:
     cdef double[:, :] cy_array = np.empty((x.nrow(), x.ncol()), dtype=np.float64)
     cdef double[:, :] tmp = <double[:x.nrow(), :x.ncol()]>(x.data())
-    cy_array[:, ::1] = tmp.copy()
+    cy_array[::1, :] = tmp.copy()
     return np.asarray(cy_array)
 
 cdef Matrix nparray_to_matrix(np.ndarray[double, ndim=2] x) except +:
-    cdef Matrix ret = Matrix(x.shape[0], x.shape[1], <const double *>x.data)
+    cdef Matrix ret = Matrix(x.shape[0], x.shape[1], <const double *>x.data, True)
     return ret
 
 cdef np.ndarray[double, ndim=1] vector_to_ndarray(Vector x) except +:
@@ -54,14 +55,28 @@ cdef class PyBsts:
     cdef unique_ptr[ScalarModelManager] cpp_scalar_model_manager
     cdef unique_ptr[ScalarManagedModel] cpp_model
     cdef shared_ptr[PythonListIoManager] cpp_io_manager
-    xdim = 0
+    cdef int xdim
 
-    def __cinit__(self, family, specification, options):
+    def __cinit__(self, family, specification, options={}, X=None, y=None):
         if not specification:
             raise ValueError("Can not create BSTS object with empty specification")
 
+        if "seed" in options:
+            seed_global_rng(options["seed"])
+        else:
+            ii32 = np.iinfo(np.int32)
+            seed_global_rng(np.random.randint(ii32.max))
+
+        self.xdim = 0
         if "predictor_names" in specification:
             self.xdim = len(specification["predictor_names"])
+        if X is not None:
+            self.xdim = X.shape[0]
+            specification["predictors_prior"]["predictors_squared_normalized"] = np.dot(X, X.T) / X.shape[0]
+        if y is not None:
+            specification["mean_value"] = np.mean(y[~np.isnan(y)])
+            specification["initial_value"] = y[0]
+            specification["sigma_prior"] = np.std(y[~np.isnan(y)], ddof=1)
 
         self.cpp_scalar_model_manager.reset(ScalarModelManager.Create(_bytes(family), self.xdim))
         self.cpp_io_manager.reset(new PythonListIoManager())
@@ -153,10 +168,95 @@ cdef class PyBsts:
                         oda_options.reset(new OdaOptions(<double>specification["eigenvalue_fudge_factor"],
                                                          <double>specification["fallback_probability"]))
                     else:
-                        oda_options.reset(new OdaOptions(0.01, 0.0))
+                        oda_options.reset(new OdaOptions(0.001, 0.0))
             elif specification["bma_method"].lower() == "ssvs":
                 bma_method = "SSVS"
 
+        if self.xdim > 0:
+            bma_method = "SSVS"
+            expected_model_size = 1
+            prior_df = 0.01
+            expected_r2 = 0.5
+            max_flips = -1
+            prior_information_weight = .01
+            diagonal_shrinkage = .5
+            np_inclusion_probabilities = np.repeat(1.0, self.xdim)
+            if not "mean_value" in specification:
+                raise ValueError("Missing mean_value.")
+            np_prior_mean = np.repeat(0.0, self.xdim)
+            np_prior_precision = np.empty((0, 0), dtype=np.float64)
+            np_prior_variance_diagonal = np.empty(0, dtype=np.float64)
+            sigma_upper_limit = sdy * 1.2
+            independent_coefficients = False
+            if "predictors_prior" in specification:
+                if "expected_model_size" in specification["predictors_prior"]:
+                    expected_model_size = specification["predictors_prior"]["expected_model_size"]
+                if "prior_df" in specification["predictors_prior"]:
+                    prior_df = specification["predictors_prior"]["prior_df"]
+                if "expected_r2" in specification["predictors_prior"]:
+                    expected_r2 = specification["predictors_prior"]["expected_r2"]
+                if "max_flips" in specification["predictors_prior"]:
+                    max_flips = specification["predictors_prior"]["max_flips"]
+                if "prior_information_weight" in specification["predictors_prior"]:
+                    prior_information_weight = specification["predictors_prior"]["prior_information_weight"]
+                if "diagonal_shrinkage" in specification["predictors_prior"]:
+                    diagonal_shrinkage = specification["predictors_prior"]["diagonal_shrinkage"]
+                if "inclusion_probabilities" in specification["predictors_prior"]:
+                    if len(specification["predictors_prior"]["inclusion_probabilities"]) == self.xdim:
+                        np_inclusion_probabilities = specification["predictors_prior"]["inclusion_probabilities"]
+                    else:
+                        raise ValueError("Dimension of inclusion_probabilities is not equal to dimensions of predictors.")
+                if "prior_mean" in specification["predictors_prior"]:
+                    if len(specification["predictors_prior"]["prior_mean"]) == self.xdim:
+                        np_prior_mean = specification["predictors_prior"]["prior_mean"]
+                    else:
+                        raise ValueError("Dimension of predictor_mean is not equal to dimensions of predictors.")
+                if "sigma_upper_limit" in specification["predictors_prior"]:
+                    if 0 <= specification["predictors_prior"]["sigma_upper_limit"]:
+                        sigma_upper_limit = specification["predictors_prior"]["sigma_upper_limit"]
+                    else:
+                        raise ValueError("Need positive sigma_upper_limit for SpikeSlabPrior.")
+                if "independent_coefficients" in specification["predictors_prior"] and \
+                        specification["predictors_prior"]["independent_coefficients"]:
+                    independent_coefficients = True
+            else:
+                raise ValueError("Missing predictors_prior in specification.")
+            if independent_coefficients:
+                if "predictors_std" not in specification["predictors_prior"]:
+                    raise ValueError("Missing predictors_std in predictors_prior for independent_coefficients case.")
+                sdx = specification["predictors_prior"]["predictors_std"]
+                sdx[sdx == 0] = 1
+                np_prior_variance_diagonal = np.square(10 * sdy / sdx)
+            else:
+                if "predictors_squared_normalized" not in specification["predictors_prior"]:
+                    raise ValueError("Missing predictors_squared_normalized in predictors_prior for independent_coefficients=false case.")
+                xtx = specification["predictors_prior"]["predictors_squared_normalized"]
+                w = diagonal_shrinkage
+                d = xtx
+                if self.xdim > 1:
+                    d  = np.diag(np.diag(xtx))
+                xtx = w * d + (1 - w) * xtx
+                xtx = xtx * prior_information_weight
+                np_prior_precision = xtx
+            if 0 < expected_model_size < self.xdim:
+                np_inclusion_probabilities = np.repeat((1.0*expected_model_size)/self.xdim, self.xdim)
+            prior_guess = np.sqrt(1 - expected_r2) * sdy
+            sigma_guess = prior_guess
+            predictors_prior.reset(new PriorSpecification(
+                nparray_to_vector(np_inclusion_probabilities), # prior_inclusion_probabilities
+                nparray_to_vector(np_prior_mean), # prior_mean
+                SpdMatrix(nparray_to_matrix(np_prior_precision), True), # prior_precision
+                nparray_to_vector(np_prior_variance_diagonal), # prior_variance_diagonal
+                max_flips, # max_flips
+                0.0, # initial_value
+                0.0, # mu
+                prior_df, # prior_df
+                prior_guess, # prior_guess
+                sigma_guess, # sigma_guess
+                sigma_upper_limit, # sigma_upper_limit
+                False, # truncate
+                False, # positive
+                False)) # fixed
         if "local_trend" in specification:
             if "static_intercept" in specification["local_trend"] and specification["local_trend"]["static_intercept"]:
                 if "initial_value" in specification and "sigma_prior" in specification:
@@ -433,26 +533,35 @@ cdef class PyBsts:
             self.cpp_io_manager))
 
     def crepr(self):
-        return <bytes>deref(self.cpp_io_manager).repr().c_str()
+        return (<bytes>deref(self.cpp_io_manager).repr().c_str()).decode("UTF-8")
 
-    def fit(self, arg1, arg2=None, seed=None):
+    def fit(self, arg1, arg2=None, indices=[], observed=[], seed=None):
         cdef Matrix empty = Matrix()
         status = False
         if seed is None:
-            seed_rng_with_timestamp()
+            deref(self.cpp_model).seed_internal_rng()
+            ii32 = np.iinfo(np.int32)
+            seed_global_rng(np.random.randint(ii32.max))
         else:
-            seed_rng_externally(<int>seed)
+            deref(self.cpp_model).seed_internal_rng(<int>seed)
+            seed_global_rng(<int>seed)
         if arg2 is None:
             y = arg1
             if y is None or len(y) == 0:
                 raise ValueError("BSTS.fit can not be called with empty data.")
-            status = deref(self.cpp_model).fit(nparray_to_vector(y), empty)
+            if observed and len(observed) == len(y):
+                status = deref(self.cpp_model).fit(nparray_to_vector(y), empty, <vector[bool]>(observed))
+            else:
+                status = deref(self.cpp_model).fit(nparray_to_vector(y), empty)
         else:
             X = arg1
             y = arg2
             if X is None or len(X) == 0 or len(y) == 0:
                 raise ValueError("BSTS.fit can not be called with empty data.")
-            status = deref(self.cpp_model).fit(nparray_to_vector(y), nparray_to_matrix(X))
+            if observed and len(observed) == len(y):
+                status = deref(self.cpp_model).fit(nparray_to_vector(y), nparray_to_matrix(X), <vector[bool]>(observed))
+            else:
+                status = deref(self.cpp_model).fit(nparray_to_vector(y), nparray_to_matrix(X))
         if not status:
             raise Exception("Failure during model fit.")
 
@@ -461,12 +570,15 @@ cdef class PyBsts:
         cdef vector[int] prediction_indices = <vector[int]>indices
         ret = np.empty((0, 0), dtype=np.float64)
         if seed is None:
-            seed_rng_with_timestamp()
+            deref(self.cpp_model).seed_internal_rng()
+            ii32 = np.iinfo(np.int32)
+            seed_global_rng(np.random.randint(ii32.max))
         else:
-            seed_rng_externally(<int>seed)
+            deref(self.cpp_model).seed_internal_rng(<int>seed)
+            seed_global_rng(<int>seed)
         if self.xdim > 0:
             if X is None or len(X) == 0:
-                ValueError("BSTS.predict can not be called with empty data.")
+                raise ValueError("BSTS.predict can not be called with empty data.")
             m = nparray_to_matrix(X)
         if indices:
             ret = matrix_to_nparray(deref(self.cpp_model).predict(m, prediction_indices))
@@ -474,6 +586,8 @@ cdef class PyBsts:
             ret = matrix_to_nparray(deref(self.cpp_model).predict(m))
         return ret
 
-    def seed(s):
-        seed_rng_externally(s)
+    def seed(self, s):
+        deref(self.cpp_model).seed_internal_rng(<int>s)
 
+    def results(self, name):
+        return vector_to_ndarray(deref(self.cpp_io_manager).results(_bytes(name)))

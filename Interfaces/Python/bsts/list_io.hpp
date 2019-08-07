@@ -99,6 +99,9 @@ namespace BOOM {
     // Print internal state
     std::string repr() const;
 
+    // Get results vector
+    Vector results(const std::string &name) const;
+
    private:
     list_t elements_;
   };
@@ -141,6 +144,9 @@ namespace BOOM {
     // Print internal state
     virtual std::string repr() const;
 
+    // Return results vector
+    virtual Vector results() const = 0;
+
    protected:
     // Calling next_position() returns the current position and advances the
     // counter.  If you need it more than once, be sure to store it.
@@ -164,6 +170,7 @@ namespace BOOM {
     explicit RealValuedPythonListIoElement(const std::string &name);
     void prepare_to_write(int niter) override;
     std::string repr() const override;
+    Vector results() const override;
 
    protected:
     double *data() override;

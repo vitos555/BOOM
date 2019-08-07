@@ -95,6 +95,8 @@ namespace BOOM {
         const Vector &final_state() const { return final_state_; }
         const std::vector<int> & ForecastTimestamps() { return forecast_timestamps_; }
         RNG & rng() {return rng_;}
+        void seed_internal_rng(int seed) { rng_.seed(seed); }
+        void seed_internal_rng() { rng_.seed(); }
 
         void SetDynamicRegressionStateComponentPositions(
             const std::vector<int> &positions) {
@@ -476,8 +478,8 @@ namespace BOOM {
       StateSpaceModelBase *model_;
     };
 
-    void seed_rng_externally(int seed);
-    void seed_rng_with_timestamp();
+    void seed_global_rng(int seed);
+    void seed_global_rng();
   }  // namespace pybsts
 }  // namespace BOOM
 

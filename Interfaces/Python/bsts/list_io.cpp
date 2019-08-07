@@ -64,6 +64,17 @@ namespace BOOM {
     }
   }
 
+  Vector PythonListIoManager::results(const std::string &name) const {
+    Vector results = Vector();
+    for (int i = 0; i < elements_.size(); ++i) {
+      if (elements_[i]->name() == name) {
+        results = elements_[i]->results();
+        break;
+      }
+    }
+    return results;
+  }
+
   //======================================================================
   PythonListIoElement::PythonListIoElement(const std::string &name) : name_(name), position_(0) {}
 
@@ -110,6 +121,10 @@ namespace BOOM {
 
   void RealValuedPythonListIoElement::prepare_to_write(int niter) {
     resize(niter);
+  }
+
+  Vector RealValuedPythonListIoElement::results() const {
+    return internal_data_;
   }
 
   //======================================================================
