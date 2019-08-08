@@ -1,4 +1,5 @@
 import os
+import subprocess
 from setuptools import setup
 from setuptools import Extension
 
@@ -16,12 +17,19 @@ except ImportError:
 
 file_ext = '.pyx' if HAS_CYTHON else '.cpp'
 
+BOOST_INCLUDE = None
+
 def find_cpp(path):
     ret = []
     for file in os.listdir(path):
         if file[-4:] == ".cpp":
             ret.append(os.path.join(path, file))
     return ret
+
+def install_boost():
+    subprocess.run(["curl", "-L", "-O", "https://dl.bintray.com/boostorg/release/1.68.0/source/boost_1_68_0.tar.gz"])
+    subprocess.run(["tar", "-xf", "boost_1_68_0.tar.gz"])
+    BOOST_INCLUDE = "./boost_1_68_0"
 
 
 extensions = [Extension("pybsts", 
@@ -55,7 +63,7 @@ extensions = [Extension("pybsts",
      find_cpp("TargetFun/") + \
      find_cpp("Models/TimeSeries/") + \
      find_cpp("cpputil/"),
-    include_dirs=['.', './Bmath', './math/cephes'] + [numpy.get_include()] if HAS_NUMPY else [],
+    include_dirs=['.', './Bmath', './math/cephes'] + [BOOST_INCLUDE] if BOOST_INCLUDE else [] + [numpy.get_include()] if HAS_NUMPY else [],
     language="c++",
     libraries=[],
     library_dirs=[],
@@ -66,6 +74,8 @@ if HAS_CYTHON:
     from Cython.Build import cythonize
     extensions = cythonize(extensions, compiler_directives={'language_level': 3})
 
+install_boost()
+
 setup(
     name="pybsts",
     author="Vitalii Ostrovskyi",
@@ -75,5 +85,5 @@ setup(
     ext_modules=extensions,
     install_requires=['cython', 'numpy'],
     packages=['causal_impact'],
-    package_dir={'causal_impact': 'Interfaces/Python/'},
+    package_dir={'causal_impact': 'Interfaces/Python/causal_impact'},
 )
