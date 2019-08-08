@@ -56,14 +56,14 @@ extensions = [Extension("pybsts",
      "Interfaces/Python/bsts/create_state_model.cpp",
      "Interfaces/Python/bsts/list_io.cpp"] + \
      find_cpp("distributions/") + \
-     find_cpp("Models/") + \
+     find_cpp("Models/", exclude=["Bart", "Nnet", "tests"]) + \
      find_cpp(".", recursive=False) + \
      find_cpp("LinAlg/") + \
      find_cpp("math/cephes/") + \
      find_cpp("numopt/") + \
      find_cpp("Bmath/") + \
-     find_cpp("Samplers/") + \
-     find_cpp("stats/") + \
+     find_cpp("Samplers/", exclude=["failed_experiments"]) + \
+     find_cpp("stats/", exclude=["tests"]) + \
      find_cpp("TargetFun/") + \
      find_cpp("cpputil/"),
     include_dirs=INCLUDE_DIRS,
@@ -82,7 +82,7 @@ setup(
     author="Vitalii Ostrovskyi",
     author_email="vitos@vitos.org.ua",
     description="Python interface to Bayesian Structured Time Series",
-    version='1.0.0',
+    version='1.0.1',
     ext_modules=extensions,
     install_requires=['cython', 'numpy'],
     packages=['causal_impact'],
