@@ -1,5 +1,4 @@
 import os
-import numpy
 from setuptools import setup
 from setuptools import Extension
 
@@ -8,6 +7,12 @@ try:
     HAS_CYTHON = True
 except ImportError:
     HAS_CYTHON = False
+
+try:
+    import numpy
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 file_ext = '.pyx' if HAS_CYTHON else '.cpp'
 
@@ -20,7 +25,7 @@ extensions = [Extension("pybsts",
      "bsts/spike_slab_prior.cpp",
      "bsts/create_state_model.cpp",
      "bsts/list_io.cpp"],
-    include_dirs=['../../', numpy.get_include()],
+    include_dirs=['../../'] + numpy.get_include() if HAS_NUMPY else [],
     language="c++",
     libraries=[],
     library_dirs=[],
@@ -39,6 +44,6 @@ setup(
     description="Python interface to Bayesian Structured Time Series",
     version='1.0.0',
     ext_modules=extensions,
-    install_requires=['cython'],
+    install_requires=['cython', 'numpy'],
     packages=['causal_impact']
 )

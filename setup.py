@@ -1,5 +1,4 @@
 import os
-import numpy
 from setuptools import setup
 from setuptools import Extension
 
@@ -8,6 +7,12 @@ try:
     HAS_CYTHON = True
 except ImportError:
     HAS_CYTHON = False
+
+try:
+    import numpy
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
 
 file_ext = '.pyx' if HAS_CYTHON else '.cpp'
 
@@ -50,7 +55,7 @@ extensions = [Extension("pybsts",
      find_cpp("TargetFun/") + \
      find_cpp("Models/TimeSeries/") + \
      find_cpp("cpputil/"),
-    include_dirs=['.', './Bmath', './math/cephes', numpy.get_include()],
+    include_dirs=['.', './Bmath', './math/cephes'] + numpy.get_include() if HAS_NUMPY else [],
     language="c++",
     libraries=[],
     library_dirs=[],
