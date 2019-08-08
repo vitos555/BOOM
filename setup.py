@@ -20,11 +20,24 @@ except ImportError:
 
 file_ext = '.pyx' if HAS_CYTHON else '.cpp'
 
-def find_cpp(path):
+def find_cpp(path, recursive=True, exclude=[]):
     ret = []
-    for file in os.listdir(path):
-        if file[-4:] == ".cpp":
-            ret.append(os.path.join(path, file))
+    if recursive:
+        for root, subdirs, files in os.walk(path):
+            for exclusion in exclude:
+                if exclusion in root:
+                    continue
+            for file in files:
+                if file[-4:] == ".cpp":
+                    ret.append(os.path.join(root, file))
+    else:
+        for file in os.listdir(path):
+            for exclusion in exclude:
+                if exclusion in file:
+                    continue
+            if file[-4:] == ".cpp":
+                ret.append(os.path.join(path, file))
+
     return ret
 
 if not os.path.exists("boost_1_68_0"):
@@ -43,26 +56,15 @@ extensions = [Extension("pybsts",
      "Interfaces/Python/bsts/create_state_model.cpp",
      "Interfaces/Python/bsts/list_io.cpp"] + \
      find_cpp("distributions/") + \
-     find_cpp("Models/Glm/") + \
-     find_cpp("Models/Glm/PosteriorSamplers/") + \
-     find_cpp("Models/Hierarchical/") + \
-     find_cpp("Models/HMM/") + \
-     find_cpp(".") + \
-     find_cpp("Models/IRT/") + \
+     find_cpp("Models/") + \
+     find_cpp(".", recursive=False) + \
      find_cpp("LinAlg/") + \
      find_cpp("math/cephes/") + \
-     find_cpp("Models/Mixtures/") + \
-     find_cpp("Models/") + \
-     find_cpp("Models/Policies/") + \
      find_cpp("numopt/") + \
-     find_cpp("Models/PointProcess/") + \
      find_cpp("Bmath/") + \
      find_cpp("Samplers/") + \
-     find_cpp("Samplers/Gilks/") + \
-     find_cpp("Models/StateSpace/") + \
      find_cpp("stats/") + \
      find_cpp("TargetFun/") + \
-     find_cpp("Models/TimeSeries/") + \
      find_cpp("cpputil/"),
     include_dirs=INCLUDE_DIRS,
     language="c++",
