@@ -78,7 +78,7 @@ namespace BOOM {
           fixed_(fixed),
           upper_limit_(upper_limit)
     {
-      if (upper_limit_ < 0 || !isfinite(upper_limit_)) {
+      if (upper_limit_ < 0 || !std::isfinite(upper_limit_)) {
         upper_limit_ = BOOM::infinity();
       }
     }
