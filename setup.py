@@ -55,7 +55,7 @@ extensions = [Extension("pybsts",
      find_cpp("TargetFun/") + \
      find_cpp("Models/TimeSeries/") + \
      find_cpp("cpputil/"),
-    include_dirs=['.', './Bmath', './math/cephes'] + numpy.get_include() if HAS_NUMPY else [],
+    include_dirs=['.', './Bmath', './math/cephes'] + [numpy.get_include()] if HAS_NUMPY else [],
     language="c++",
     libraries=[],
     library_dirs=[],
