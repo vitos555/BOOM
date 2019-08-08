@@ -9,15 +9,16 @@ try:
 except ImportError:
     HAS_CYTHON = False
 
+INCLUDE_DIRS = ['.', './Bmath', './math/cephes']
+
 try:
     import numpy
     HAS_NUMPY = True
+    INCLUDE_DIRS += [numpy.get_include()]
 except ImportError:
     HAS_NUMPY = False
 
 file_ext = '.pyx' if HAS_CYTHON else '.cpp'
-
-BOOST_INCLUDE = None
 
 def find_cpp(path):
     ret = []
@@ -26,11 +27,11 @@ def find_cpp(path):
             ret.append(os.path.join(path, file))
     return ret
 
-def install_boost():
+if not os.path.exists("boost_1_68_0"):
     subprocess.run(["curl", "-L", "-O", "https://dl.bintray.com/boostorg/release/1.68.0/source/boost_1_68_0.tar.gz"])
     subprocess.run(["tar", "-xf", "boost_1_68_0.tar.gz"])
-    BOOST_INCLUDE = "./boost_1_68_0"
 
+INCLUDE_DIRS += ["./boost_1_68_0"]
 
 extensions = [Extension("pybsts", 
     ["Interfaces/Python/bsts/pybsts" + file_ext,
@@ -63,18 +64,16 @@ extensions = [Extension("pybsts",
      find_cpp("TargetFun/") + \
      find_cpp("Models/TimeSeries/") + \
      find_cpp("cpputil/"),
-    include_dirs=['.', './Bmath', './math/cephes'] + [BOOST_INCLUDE] if BOOST_INCLUDE else [] + [numpy.get_include()] if HAS_NUMPY else [],
+    include_dirs=INCLUDE_DIRS,
     language="c++",
     libraries=[],
     library_dirs=[],
-    extra_compile_args=['-std=c++11', '-DADD_'],
+    extra_compile_args=['-std=c++11', '-DADD_'] + ["-I"+include_dir for include_dir in INCLUDE_DIRS],
     extra_link_args=[])]
 
 if HAS_CYTHON:
     from Cython.Build import cythonize
     extensions = cythonize(extensions, compiler_directives={'language_level': 3})
-
-install_boost()
 
 setup(
     name="pybsts",
