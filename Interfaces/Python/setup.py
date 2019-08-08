@@ -1,7 +1,7 @@
 import os
 import numpy
-from distutils.core import setup
-from distutils.extension import Extension
+from setuptools import setup
+from setuptools import Extension
 
 try:
     from Cython.Build import cythonize
@@ -37,7 +37,8 @@ setup(
     author="Vitalii Ostrovskyi",
     author_email="vitos@vitos.org.ua",
     description="Python interface to Bayesian Structured Time Series",
-    version='0.0.1',
+    version='1.0.0',
     ext_modules=extensions,
-    py_modules=['causal_impact']
+    install_requires=['cython'],
+    packages=['causal_impact']
 )
