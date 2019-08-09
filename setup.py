@@ -24,17 +24,23 @@ def find_cpp(path, recursive=True, exclude=[]):
     ret = []
     if recursive:
         for root, subdirs, files in os.walk(path):
+            found_exclusion = False
             for exclusion in exclude:
                 if exclusion in root:
-                    continue
+                    found_exclusion = True
+            if found_exclusion:
+                continue
             for file in files:
                 if file[-4:] == ".cpp":
                     ret.append(os.path.join(root, file))
     else:
         for file in os.listdir(path):
+            found_exclusion = False
             for exclusion in exclude:
                 if exclusion in file:
-                    continue
+                    found_exclusion = True
+            if found_exclusion:
+                continue
             if file[-4:] == ".cpp":
                 ret.append(os.path.join(path, file))
     return ret
