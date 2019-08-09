@@ -37,7 +37,6 @@ def find_cpp(path, recursive=True, exclude=[]):
                     continue
             if file[-4:] == ".cpp":
                 ret.append(os.path.join(path, file))
-
     return ret
 
 if not os.path.exists("boost_1_68_0"):
@@ -56,14 +55,14 @@ extensions = [Extension("pybsts",
      "Interfaces/Python/bsts/create_state_model.cpp",
      "Interfaces/Python/bsts/list_io.cpp"] + \
      find_cpp("distributions/") + \
-     find_cpp("Models/", exclude=["Bart", "Nnet", "tests"]) + \
+     find_cpp("Models/", exclude=["Bart", "Nnet", "test"]) + \
      find_cpp(".", recursive=False) + \
      find_cpp("LinAlg/") + \
      find_cpp("math/cephes/") + \
      find_cpp("numopt/") + \
      find_cpp("Bmath/") + \
      find_cpp("Samplers/", exclude=["failed_experiments"]) + \
-     find_cpp("stats/", exclude=["tests"]) + \
+     find_cpp("stats/", exclude=["test"]) + \
      find_cpp("TargetFun/") + \
      find_cpp("cpputil/"),
     include_dirs=INCLUDE_DIRS,
