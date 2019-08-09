@@ -61,10 +61,10 @@ extensions = [Extension("pybsts",
      "Interfaces/Python/bsts/create_state_model.cpp",
      "Interfaces/Python/bsts/list_io.cpp"] + \
      find_cpp("distributions/") + \
-     find_cpp("Models/", exclude=["Bart", "Nnet", "test"]) + \
+     find_cpp("Models/", exclude=["Bart", "Nnet", "test", "HMM", "IRT", "Mixtures"]) + \
      find_cpp(".", recursive=False) + \
      find_cpp("LinAlg/") + \
-     find_cpp("math/cephes/") + \
+     find_cpp("math/") + \
      find_cpp("numopt/") + \
      find_cpp("Bmath/") + \
      find_cpp("Samplers/", exclude=["failed_experiments"]) + \
