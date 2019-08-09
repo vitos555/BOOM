@@ -48,6 +48,7 @@ def find_cpp(path, recursive=True, exclude=[]):
 if not os.path.exists("boost_1_68_0"):
     subprocess.run(["curl", "-L", "-O", "https://dl.bintray.com/boostorg/release/1.68.0/source/boost_1_68_0.tar.gz"])
     subprocess.run(["tar", "-xf", "boost_1_68_0.tar.gz"])
+    os.remove("boost_1_68_0.tar.gz")
 
 INCLUDE_DIRS += ["./boost_1_68_0"]
 
