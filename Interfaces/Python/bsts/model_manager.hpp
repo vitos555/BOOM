@@ -328,10 +328,11 @@ namespace BOOM {
         explicit ScalarStateSpaceSpecification(
           std::unique_ptr<PriorSpecification> initial_state_prior,
           std::unique_ptr<PriorSpecification> sigma_prior,
+          std::unique_ptr<PriorSpecification> seasonal_sigma_prior,
           std::unique_ptr<PriorSpecification> predictors_prior,
           std::unique_ptr<LocalTrendSpecification> local_trend,
           const std::string &bma_method, std::unique_ptr<OdaOptions> oda_options,
-          std::vector<SeasonSpecification> seasons,
+          const std::vector<SeasonSpecification> &seasons,
           std::unique_ptr<HierarchicalModelSpecification> hierarchical_regression_specification,
           std::unique_ptr<PriorSpecification> ar_prior=nullptr,
           const std::vector<std::string> &predictor_names = std::vector<std::string>(), int ar_order = 0,
@@ -339,6 +340,7 @@ namespace BOOM {
 
         std::shared_ptr<PriorSpecification> initial_state_prior() const { return initial_state_prior_; }
         std::shared_ptr<PriorSpecification> sigma_prior() const { return sigma_prior_; }
+        std::shared_ptr<PriorSpecification> seasonal_sigma_prior() const { return seasonal_sigma_prior_; }
         std::shared_ptr<PriorSpecification> predictors_prior() const { return predictors_prior_; }
         std::shared_ptr<OdaOptions> oda_options() const { return oda_options_; }
         std::shared_ptr<LocalTrendSpecification> local_trend() const { return local_trend_; }
@@ -353,6 +355,7 @@ namespace BOOM {
 
       private:
         std::shared_ptr<PriorSpecification> sigma_prior_;
+        std::shared_ptr<PriorSpecification> seasonal_sigma_prior_;
         std::shared_ptr<PriorSpecification> initial_state_prior_;
         std::shared_ptr<PriorSpecification> predictors_prior_;
         int ar_order_;

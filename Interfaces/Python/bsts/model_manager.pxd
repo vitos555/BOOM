@@ -95,6 +95,7 @@ cdef extern from "model_manager.hpp" namespace "BOOM::pybsts":
         ScalarStateSpaceSpecification(
             unique_ptr[PriorSpecification] initial_state_prior,
             unique_ptr[PriorSpecification] sigma_prior,
+            unique_ptr[PriorSpecification] seasonal_sigma_prior,
             unique_ptr[PriorSpecification] predictors_prior,
             unique_ptr[LocalTrendSpecification] local_trend,
             const string bma_method, unique_ptr[OdaOptions] oda_options,

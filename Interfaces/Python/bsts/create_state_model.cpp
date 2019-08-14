@@ -100,8 +100,8 @@ namespace BOOM {
       } else if (specification->dynamic_regression()) {
          model->sampling_model()->add_state(CreateDynamicRegressionStateModel(specification, dynamic_cast<StateSpaceRegressionManagedModel*>(model), prefix));
       }
-      for (auto season = specification->seasons().begin(); season != specification->seasons().end(); season++) {
-        model->sampling_model()->add_state(CreateSeasonal(specification, &*season, prefix));
+      for (std::size_t i = 0; i < (specification->seasons()).size(); ++i) {
+        model->sampling_model()->add_state(CreateSeasonal(specification, &(specification->seasons()[i]), prefix));
       }
       InstallPostStateListElements();      
     }
@@ -986,14 +986,14 @@ namespace BOOM {
 
       int nseasons = season->number_of_seasons();
       int season_duration = season->duration();
-      std::shared_ptr<PriorSpecification> prior_spec = specification->sigma_prior();
+      std::shared_ptr<PriorSpecification> prior_spec = specification->seasonal_sigma_prior();
       if (!prior_spec) {
-        report_error("CreateSeasonal: empty sigma_prior");
+        report_error("CreateSeasonal: empty seasonal_sigma_prior");
       }
 
       SeasonalStateModel * seasonal(
           new SeasonalStateModel(nseasons, season_duration));
-      seasonal->set_sigsq(square(prior_spec->initial_value()));
+      seasonal->set_sigsq(square(prior_spec->prior_guess()));
 
       // Set prior distribution for initial state.
       seasonal->set_initial_state_variance(

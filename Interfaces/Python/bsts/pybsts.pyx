@@ -85,6 +85,7 @@ cdef class PyBsts:
         cdef unique_ptr[LocalTrendSpecification] local_trend
         cdef unique_ptr[PriorSpecification] initial_state_prior
         cdef unique_ptr[PriorSpecification] sigma_prior
+        cdef unique_ptr[PriorSpecification] seasonal_sigma_prior
         cdef unique_ptr[PriorSpecification] predictors_prior
         cdef unique_ptr[PriorSpecification] trend_prior
         cdef unique_ptr[PriorSpecification] slope_prior
@@ -155,9 +156,27 @@ cdef class PyBsts:
             seasons.resize(len(specification["seasons"]))
             for season in specification["seasons"]:
                 if "duration" in season and "number_of_seasons" in season:
-                    seasons.push_back(deref(
-                        new SeasonSpecification(<int>specification["number_of_seasons"],
-                                                <int>specification["duration"])))
+                    seasons.push_back(SeasonSpecification(<int>(season["number_of_seasons"]),
+                                                          <int>(season["duration"])))
+            sigma_upper_limit = sdy
+            prior_df = 0.01
+            prior_guess = 0.01 * sdy
+            sigma_guess = sdy
+            seasonal_sigma_prior.reset(new PriorSpecification(
+                    Vector(), # prior_inclusion_probabilities
+                    Vector(), # prior_mean
+                    SpdMatrix(), # prior_precision
+                    Vector(), # prior_variance_diagonal
+                    0, # max_flips
+                    0.0, # initial_value
+                    0.0, # mu
+                    prior_df, # prior_df
+                    prior_guess, # prior_guess
+                    sigma_guess, # sigma_guess
+                    sigma_upper_limit, # sigma_upper_limit
+                    False, # truncate
+                    False, # positive
+                    False)) # fixed
 
         if "bma_method" in specification:
             if specification["bma_method"].lower() == "oda":
@@ -313,7 +332,7 @@ cdef class PyBsts:
                         move(trend_df_prior),
                         move(slope_df_prior),
                         move(slope_ar1_prior),
-                        True, False))
+                        False, False))
                 elif "local_linear_trend" in specification["local_trend"] and specification["local_trend"]["local_linear_trend"]:
                     prior_guess = sdy * 0.01
                     prior_df = 0.01
@@ -359,7 +378,7 @@ cdef class PyBsts:
                         move(trend_df_prior),
                         move(slope_df_prior),
                         move(slope_ar1_prior),
-                        True, False))
+                        False, False))
                 elif "semilocal_linear_trend" in specification["local_trend"] and specification["local_trend"]["semilocal_linear_trend"]:
                     prior_guess = sdy * 0.01
                     prior_df = 0.01
@@ -422,7 +441,7 @@ cdef class PyBsts:
                         move(trend_df_prior),
                         move(slope_df_prior),
                         move(slope_ar1_prior),
-                        True, False))
+                        False, False))
 
         ar_order = 0
         if "ar_order" in specification and specification["ar_order"]:
@@ -521,6 +540,7 @@ cdef class PyBsts:
             new ScalarStateSpaceSpecification(
                 move(initial_state_prior),
                 move(sigma_prior),
+                move(seasonal_sigma_prior),
                 move(predictors_prior),
                 move(local_trend),
                 _bytes(bma_method), move(oda_options),

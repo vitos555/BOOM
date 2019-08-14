@@ -55,6 +55,7 @@ class CausalImpact:
     y = None
     pre_period = None
     post_period = None
+    mid_period = None
     results = None
 
     def __init__(self, x, y, pre_period, post_period,
@@ -95,19 +96,21 @@ class CausalImpact:
             self.transformation_fn(self.x, self.pre_period)
         prediction_y = retransform_y(self.y, self.post_period)
         prediction_x = retransform_x(self.x, self.post_period)
+        self.mid_period = range(0,0)
+        if min(self.post_period) - max(self.pre_period) > 0:
+            self.mid_period = range(max(self.pre_period), min(self.post_period))
+        mid_hold_y = retransform_y(self.y, self.mid_period)
+        mid_hold_x = retransform_x(self.x, self.mid_period)
         input_x = np.concatenate((training_x, prediction_x), axis=0)
         input_y = np.concatenate((training_y, np.repeat(np.nan, self.post_period[-1]-self.post_period[0]+1)))
         observed_y = [True]*(self.pre_period[-1]-self.pre_period[0]+1) + \
             [False]*(self.post_period[-1]-self.post_period[0]+1)
         self.bsts.fit(input_x, input_y, observed=observed_y)
+        adjusted_post_period = np.array(self.post_period) - (min(self.post_period) - max(self.pre_period))
         state_contributions = np.array(self.bsts.results("state.contributions"))
-        # print(state_contributions)
         state_contributions.shape = (input_x.shape[0], -1, self.niter)
         state_contributions = np.transpose(state_contributions, axes=[2, 0, 1])
-        # print(state_contributions)
-        # print(np.sum(state_contributions, axis=2)[1, :])
         pred_mean = np.sum(state_contributions, axis=2)[self.burn:, :]
-        print(pred_mean[98:100:, :])
         sigma_obs = self.bsts.results("sigma.obs")[self.burn:]
         sigma_obs = np.reshape(np.repeat(sigma_obs, pred_mean.shape[1]),
                                pred_mean.shape)
@@ -116,94 +119,117 @@ class CausalImpact:
         pred_mean = np.mean(pred_mean, axis=0)
         pred_lower = np.quantile(pred, self.alpha/2, axis=0)
         pred_upper = np.quantile(pred, 1-self.alpha/2, axis=0)
-        actuals = np.concatenate((training_y, prediction_y))
-        self.results = (untransform_y(actuals, np.array(list(self.pre_period) + list(self.post_period))),
-                untransform_y(pred_mean, np.array(list(self.pre_period) + list(self.post_period))),
-                untransform_y(pred_lower, np.array(list(self.pre_period) + list(self.post_period))),
-                untransform_y(pred_upper, np.array(list(self.pre_period) + list(self.post_period))),
-                untransform_y(pred, np.array(list(self.pre_period) + list(self.post_period))))
+        actuals = np.concatenate((training_y, mid_hold_y, prediction_y))
+        pred_mean = np.concatenate((pred_mean[self.pre_period], mid_hold_y, pred_mean[adjusted_post_period]))
+        pred_lower = np.concatenate((pred_lower[self.pre_period], mid_hold_y, pred_lower[adjusted_post_period]))
+        pred_upper = np.concatenate((pred_upper[self.pre_period], mid_hold_y, pred_upper[adjusted_post_period]))
+        pred = np.concatenate((pred[:, self.pre_period], np.repeat(np.reshape(mid_hold_y, (1, -1)), pred.shape[0], axis=0), pred[:, adjusted_post_period]), axis=1)
+        self.results = (untransform_y(actuals, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
+                untransform_y(pred_mean, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
+                untransform_y(pred_lower, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
+                untransform_y(pred_upper, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
+                untransform_y(pred, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))))
         return self.results
 
     def summary_dict(self):
         if self.results is None:
             self.analyze()
         results = self.results
-        summary = {"average": {}, "cumulative": {}}
+        summary_obj = {"average": {}, "cumulative": {}}
         post_actual = results[0][self.post_period]
-        summary["average"]["actual"] = np.mean(post_actual)
-        summary["cumulative"]["actual"] = np.sum(post_actual)
+        summary_obj["average"]["actual"] = np.mean(post_actual)
+        summary_obj["cumulative"]["actual"] = np.sum(post_actual)
 
         post_predicted = results[1][self.post_period]
-        summary["average"]["predicted"] = np.mean(post_predicted)
-        summary["cumulative"]["predicted"] = np.sum(post_predicted)
+        summary_obj["average"]["predicted"] = np.mean(post_predicted)
+        summary_obj["cumulative"]["predicted"] = np.sum(post_predicted)
 
         post_pred = results[4][:, self.post_period]
         post_actual_rep = np.repeat(np.reshape(post_actual, (1, -1)), post_pred.shape[0], axis=0)
         post_actual_rep.shape = post_pred.shape
 
-        summary["average"]["predicted_lower"] = np.quantile(np.mean(post_pred, axis=0), self.alpha/2)
-        summary["cumulative"]["predicted_lower"] = np.quantile(np.sum(post_pred, axis=0), self.alpha/2)
+        summary_obj["average"]["predicted_lower"] = np.quantile(np.mean(post_pred, axis=0), self.alpha/2)
+        summary_obj["cumulative"]["predicted_lower"] = np.quantile(np.sum(post_pred, axis=0), self.alpha/2)
 
-        summary["average"]["predicted_upper"] = np.quantile(np.mean(post_pred, axis=0), 1.0 - self.alpha/2)
-        summary["cumulative"]["predicted_upper"] = np.quantile(np.sum(post_pred, axis=0), 1.0 - self.alpha/2)
+        summary_obj["average"]["predicted_upper"] = np.quantile(np.mean(post_pred, axis=0), 1.0 - self.alpha/2)
+        summary_obj["cumulative"]["predicted_upper"] = np.quantile(np.sum(post_pred, axis=0), 1.0 - self.alpha/2)
 
-        summary["average"]["predicted_std"] = np.std(np.mean(post_pred, axis=0), ddof=1)
-        summary["cumulative"]["predicted_std"] = np.std(np.sum(post_pred, axis=0), ddof=1)
+        summary_obj["average"]["predicted_std"] = np.std(np.mean(post_pred, axis=0), ddof=1)
+        summary_obj["cumulative"]["predicted_std"] = np.std(np.sum(post_pred, axis=0), ddof=1)
 
-        summary["average"]["abs_effect"] = np.mean(post_actual) - np.mean(post_predicted)
-        summary["cumulative"]["abs_effect"] = np.sum(post_actual) - np.sum(post_predicted)
+        summary_obj["average"]["abs_effect"] = np.mean(post_actual) - np.mean(post_predicted)
+        summary_obj["cumulative"]["abs_effect"] = np.sum(post_actual) - np.sum(post_predicted)
 
-        summary["average"]["abs_effect_lower"] = \
+        summary_obj["average"]["abs_effect_lower"] = \
             np.quantile(np.mean(post_actual_rep - post_pred, axis=0), self.alpha/2)
-        summary["cumulative"]["abs_effect_lower"] = \
+        summary_obj["cumulative"]["abs_effect_lower"] = \
             np.quantile(np.sum(post_actual_rep - post_pred, axis=0), self.alpha/2)
 
-        summary["average"]["abs_effect_upper"] = \
+        summary_obj["average"]["abs_effect_upper"] = \
             np.quantile(np.mean(post_actual_rep - post_pred, axis=0), 1.0 - self.alpha/2)
-        summary["cumulative"]["abs_effect_upper"] = \
+        summary_obj["cumulative"]["abs_effect_upper"] = \
             np.quantile(np.sum(post_actual_rep - post_pred, axis=0), 1.0 - self.alpha/2)
 
-        summary["average"]["abs_effect_std"] = np.std(np.mean(post_actual_rep - post_pred, axis=0))
-        summary["cumulative"]["abs_effect_std"] = np.std(np.sum(post_actual_rep - post_pred, axis=0))
+        summary_obj["average"]["abs_effect_std"] = np.std(np.mean(post_actual_rep - post_pred, axis=0))
+        summary_obj["cumulative"]["abs_effect_std"] = np.std(np.sum(post_actual_rep - post_pred, axis=0))
 
-        summary["average"]["rel_effect"] = \
-            summary["average"]["abs_effect"] / summary["average"]["predicted"]
-        summary["cumulative"]["rel_effect"] = \
-            summary["cumulative"]["abs_effect"] / summary["cumulative"]["predicted"]
+        summary_obj["average"]["rel_effect"] = \
+            summary_obj["average"]["abs_effect"] / summary_obj["average"]["predicted"]
+        summary_obj["cumulative"]["rel_effect"] = \
+            summary_obj["cumulative"]["abs_effect"] / summary_obj["cumulative"]["predicted"]
 
-        summary["average"]["rel_effect_lower"] = \
-            summary["average"]["abs_effect_lower"] / summary["average"]["predicted"]
-        summary["cumulative"]["rel_effect_lower"] = \
-            summary["cumulative"]["abs_effect_lower"] / summary["cumulative"]["predicted"]
+        summary_obj["average"]["rel_effect_lower"] = \
+            summary_obj["average"]["abs_effect_lower"] / summary_obj["average"]["predicted"]
+        summary_obj["cumulative"]["rel_effect_lower"] = \
+            summary_obj["cumulative"]["abs_effect_lower"] / summary_obj["cumulative"]["predicted"]
 
-        summary["average"]["rel_effect_upper"] = \
-            summary["average"]["abs_effect_upper"] / summary["average"]["predicted"]
-        summary["cumulative"]["rel_effect_upper"] = \
-            summary["cumulative"]["abs_effect_upper"] / summary["cumulative"]["predicted"]
+        summary_obj["average"]["rel_effect_upper"] = \
+            summary_obj["average"]["abs_effect_upper"] / summary_obj["average"]["predicted"]
+        summary_obj["cumulative"]["rel_effect_upper"] = \
+            summary_obj["cumulative"]["abs_effect_upper"] / summary_obj["cumulative"]["predicted"]
 
-        summary["average"]["rel_effect_std"] = \
-            summary["average"]["abs_effect_std"] / summary["average"]["predicted"]
-        summary["cumulative"]["rel_effect_std"] = \
-            summary["cumulative"]["abs_effect_std"] / summary["cumulative"]["predicted"]
+        summary_obj["average"]["rel_effect_std"] = \
+            summary_obj["average"]["abs_effect_std"] / summary_obj["average"]["predicted"]
+        summary_obj["cumulative"]["rel_effect_std"] = \
+            summary_obj["cumulative"]["abs_effect_std"] / summary_obj["cumulative"]["predicted"]
 
         post_pred_row_sums = np.sum(post_pred, axis=0)
         post_actual_sum = np.sum(post_actual)
-        summary["cumulative"]["pvalue"] = min(np.sum(post_pred_row_sums >= post_actual_sum) + 1,
+        summary_obj["cumulative"]["pvalue"] = min(np.sum(post_pred_row_sums >= post_actual_sum) + 1,
                                               np.sum(post_pred_row_sums <= post_actual_sum) + 1) / \
                                           (len(post_pred_row_sums) + 1)
-        summary["cumulative"]["significance"] = (1-summary["cumulative"]["pvalue"])*100
+        summary_obj["cumulative"]["significance"] = (1-summary_obj["cumulative"]["pvalue"])*100
 
-        return summary
+        return summary_obj
+
+    def lines(self):
+        self.analyze()
+        results = self.results
+        actual = results[0]
+        pred = results[4]
+        actual_rep =  np.repeat(np.reshape(actual, (1, -1)), pred.shape[0], axis=0)
+        ret = {"point_estimates": {}, "cum_diff": {}, "abs_diff": {}}
+        ret["point_estimates"]["actuals"] = results[0]
+        ret["point_estimates"]["mean_pred"] = results[1]
+        ret["point_estimates"]["lower_pred"] = results[2]
+        ret["point_estimates"]["upper_pred"] = results[3]
+        ret["abs_diff"]["mean"] = np.mean(actual_rep - pred, axis=0)
+        ret["abs_diff"]["lower"] = np.quantile(actual_rep - pred, self.alpha/2, axis=0)
+        ret["abs_diff"]["upper"] = np.quantile(actual_rep - pred, 1-self.alpha/2, axis=0)
+        ret["cum_diff"]["mean"] = np.cumsum(ret["abs_diff"]["mean"])
+        ret["cum_diff"]["lower"] = np.cumsum(ret["abs_diff"]["lower"])
+        ret["cum_diff"]["upper"] = np.cumsum(ret["abs_diff"]["upper"])
+        return ret
 
     def summary(self):
-        summary_dict = self.summary_dict()
-        summary_dict["CI"] = (1.0-self.alpha)*100
-        for col in summary_dict["average"]:
+        summary_obj = self.summary_dict()
+        summary_obj["CI"] = (1.0-self.alpha)*100
+        for col in summary_obj["average"]:
             if col[0:4] == "rel_":
-                summary_dict["average"][col] *= 100
-        for col in summary_dict["cumulative"]:
+                summary_obj["average"][col] *= 100
+        for col in summary_obj["cumulative"]:
             if col[0:4] == "rel_":
-                summary_dict["cumulative"][col] *= 100
+                summary_obj["cumulative"][col] *= 100
 
         out = """
 Posterior inference {{CausalImpact}}
@@ -222,4 +248,4 @@ Relative effect (s.d.)   {average[rel_effect]:7.2f}% ({average[rel_effect_std]:.
 Posterior tail-area probability p:   {cumulative[pvalue]:.5f}
 Posterior prob. of a causal effect:  {cumulative[significance]:.2f}%
 """
-        return out.format(**summary_dict)
+        return out.format(**summary_obj)
