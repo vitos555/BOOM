@@ -517,7 +517,7 @@ cdef class PyBsts:
                 save_prediction_errors = True
             if "niter" in options and options["niter"] > 0:
                 niter = <int>(options["niter"])
-            if "ping" in options and options["ping"] > 0:
+            if "ping" in options and options["ping"] is not None:
                 ping = <int>(options["ping"])
             if "burn" in options and options["burn"] > 0:
                 burn = <int>(options["burn"])

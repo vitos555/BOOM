@@ -57,10 +57,11 @@ class CausalImpact:
     post_period = None
     mid_period = None
     results = None
+    seed = None
 
     def __init__(self, x, y, pre_period, post_period,
                  predictor_names=None, seasons=[], dynamic_regression=False,
-                 niter=1000, burn=100, standardize=False, alpha=0.05, seed=None):
+                 niter=1000, burn=100, standardize=False, alpha=0.05, ping=None, seed=None):
         if not predictor_names:
             predictor_names = ["intercept"] + ["x" + str(i) for i in range(0, x.shape[0])]
         x = np.insert(x, 0, np.repeat(1.0, x.shape[1]), axis=0).T
@@ -72,9 +73,10 @@ class CausalImpact:
                          "sigma_prior": np.std(y[pre_period], ddof=1),
                          "predictors_prior": {"predictors_squared_normalized": np.dot(x.T, x)/x.shape[0]},
                          "local_trend": {"local_level": True}}
-        options = {"niter": niter, "ping": niter/10, "burn": burn}
+        options = {"niter": niter, "ping": niter/10 if ping is None else ping, "burn": burn}
         if seed:
             options["seed"] = seed
+            self.seed = seed + 1
         self.bsts = pybsts.PyBsts("gaussian", specification, options)
         self.transformation_fn = identity_fn
         if standardize:
@@ -86,6 +88,9 @@ class CausalImpact:
         self.y = y
         self.pre_period = pre_period
         self.post_period = post_period
+        self.mid_period = range(0, 0)
+        if min(self.post_period) - max(self.pre_period) > 0:
+            self.mid_period = range(max(self.pre_period) + 1, min(self.post_period))
 
     def analyze(self):
         if self.results is not None:
@@ -96,17 +101,14 @@ class CausalImpact:
             self.transformation_fn(self.x, self.pre_period)
         prediction_y = retransform_y(self.y, self.post_period)
         prediction_x = retransform_x(self.x, self.post_period)
-        self.mid_period = range(0,0)
-        if min(self.post_period) - max(self.pre_period) > 0:
-            self.mid_period = range(max(self.pre_period), min(self.post_period))
         mid_hold_y = retransform_y(self.y, self.mid_period)
         mid_hold_x = retransform_x(self.x, self.mid_period)
         input_x = np.concatenate((training_x, prediction_x), axis=0)
         input_y = np.concatenate((training_y, np.repeat(np.nan, self.post_period[-1]-self.post_period[0]+1)))
         observed_y = [True]*(self.pre_period[-1]-self.pre_period[0]+1) + \
             [False]*(self.post_period[-1]-self.post_period[0]+1)
-        self.bsts.fit(input_x, input_y, observed=observed_y)
-        adjusted_post_period = np.array(self.post_period) - (min(self.post_period) - max(self.pre_period))
+        self.bsts.fit(input_x, input_y, observed=observed_y, seed=self.seed)
+        adjusted_post_period = np.array(self.post_period) - (min(self.post_period) - max(self.pre_period) - 1)
         state_contributions = np.array(self.bsts.results("state.contributions"))
         state_contributions.shape = (input_x.shape[0], -1, self.niter)
         state_contributions = np.transpose(state_contributions, axes=[2, 0, 1])
@@ -115,20 +117,21 @@ class CausalImpact:
         sigma_obs = np.reshape(np.repeat(sigma_obs, pred_mean.shape[1]),
                                pred_mean.shape)
         noise = np.random.normal(0, sigma_obs)
+        nan_mid_y = np.repeat(np.nan, mid_hold_y.shape[0])
         pred = pred_mean + noise
         pred_mean = np.mean(pred_mean, axis=0)
         pred_lower = np.quantile(pred, self.alpha/2, axis=0)
         pred_upper = np.quantile(pred, 1-self.alpha/2, axis=0)
         actuals = np.concatenate((training_y, mid_hold_y, prediction_y))
-        pred_mean = np.concatenate((pred_mean[self.pre_period], mid_hold_y, pred_mean[adjusted_post_period]))
-        pred_lower = np.concatenate((pred_lower[self.pre_period], mid_hold_y, pred_lower[adjusted_post_period]))
-        pred_upper = np.concatenate((pred_upper[self.pre_period], mid_hold_y, pred_upper[adjusted_post_period]))
-        pred = np.concatenate((pred[:, self.pre_period], np.repeat(np.reshape(mid_hold_y, (1, -1)), pred.shape[0], axis=0), pred[:, adjusted_post_period]), axis=1)
+        pred_mean = np.concatenate((pred_mean[self.pre_period], nan_mid_y, pred_mean[adjusted_post_period]))
+        pred_lower = np.concatenate((pred_lower[self.pre_period], nan_mid_y, pred_lower[adjusted_post_period]))
+        pred_upper = np.concatenate((pred_upper[self.pre_period], nan_mid_y, pred_upper[adjusted_post_period]))
+        pred = np.concatenate((pred[:, self.pre_period], np.repeat(np.reshape(nan_mid_y, (1, -1)), pred.shape[0], axis=0), pred[:, adjusted_post_period]), axis=1)
         self.results = (untransform_y(actuals, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
                 untransform_y(pred_mean, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
                 untransform_y(pred_lower, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
                 untransform_y(pred_upper, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))),
-                untransform_y(pred, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))))
+                untransform_y(pred.T, np.array(list(self.pre_period) + list(self.mid_period) + list(self.post_period))))
         return self.results
 
     def summary_dict(self):
@@ -144,9 +147,8 @@ class CausalImpact:
         summary_obj["average"]["predicted"] = np.mean(post_predicted)
         summary_obj["cumulative"]["predicted"] = np.sum(post_predicted)
 
-        post_pred = results[4][:, self.post_period]
-        post_actual_rep = np.repeat(np.reshape(post_actual, (1, -1)), post_pred.shape[0], axis=0)
-        post_actual_rep.shape = post_pred.shape
+        post_pred = results[4][self.post_period, :]
+        post_actual_rep = np.repeat(np.reshape(post_actual, (-1, 1)), post_pred.shape[1], axis=1)
 
         summary_obj["average"]["predicted_lower"] = np.quantile(np.mean(post_pred, axis=0), self.alpha/2)
         summary_obj["cumulative"]["predicted_lower"] = np.quantile(np.sum(post_pred, axis=0), self.alpha/2)
@@ -195,30 +197,38 @@ class CausalImpact:
 
         post_pred_row_sums = np.sum(post_pred, axis=0)
         post_actual_sum = np.sum(post_actual)
-        summary_obj["cumulative"]["pvalue"] = min(np.sum(post_pred_row_sums >= post_actual_sum) + 1,
-                                              np.sum(post_pred_row_sums <= post_actual_sum) + 1) / \
+        summary_obj["cumulative"]["pvalue"] = (min(np.sum(post_pred_row_sums >= post_actual_sum),
+                                              np.sum(post_pred_row_sums <= post_actual_sum) ) + 1) / \
                                           (len(post_pred_row_sums) + 1)
         summary_obj["cumulative"]["significance"] = (1-summary_obj["cumulative"]["pvalue"])*100
 
         return summary_obj
 
-    def lines(self):
+    def lines(self, aslists=False, precision=None):
         self.analyze()
         results = self.results
         actual = results[0]
         pred = results[4]
-        actual_rep =  np.repeat(np.reshape(actual, (1, -1)), pred.shape[0], axis=0)
+        actual_rep =  np.repeat(np.reshape(actual, (-1, 1)), pred.shape[1], axis=1)
         ret = {"point_estimates": {}, "cum_diff": {}, "abs_diff": {}}
         ret["point_estimates"]["actuals"] = results[0]
-        ret["point_estimates"]["mean_pred"] = results[1]
-        ret["point_estimates"]["lower_pred"] = results[2]
-        ret["point_estimates"]["upper_pred"] = results[3]
-        ret["abs_diff"]["mean"] = np.mean(actual_rep - pred, axis=0)
-        ret["abs_diff"]["lower"] = np.quantile(actual_rep - pred, self.alpha/2, axis=0)
-        ret["abs_diff"]["upper"] = np.quantile(actual_rep - pred, 1-self.alpha/2, axis=0)
+        ret["point_estimates"]["pred_mean"] = results[1]
+        ret["point_estimates"]["pred_lower"] = results[2]
+        ret["point_estimates"]["pred_upper"] = results[3]
+        ret["abs_diff"]["mean"] = np.mean(actual_rep - pred, axis=1)
+        ret["abs_diff"]["lower"] = np.quantile(actual_rep - pred, self.alpha/2, axis=1)
+        ret["abs_diff"]["upper"] = np.quantile(actual_rep - pred, 1-self.alpha/2, axis=1)
         ret["cum_diff"]["mean"] = np.cumsum(ret["abs_diff"]["mean"])
         ret["cum_diff"]["lower"] = np.cumsum(ret["abs_diff"]["lower"])
         ret["cum_diff"]["upper"] = np.cumsum(ret["abs_diff"]["upper"])
+        if precision is not None:
+            for parent in ret:
+                for key in ret[parent]:
+                    ret[parent][key] = np.around(ret[parent][key], decimals=precision)
+        if aslists:
+            for parent in ret:
+                for key in ret[parent]:
+                    ret[parent][key] = list(ret[parent][key])
         return ret
 
     def summary(self):
