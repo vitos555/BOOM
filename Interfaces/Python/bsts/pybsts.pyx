@@ -153,7 +153,6 @@ cdef class PyBsts:
             raise ValueError("Sigma prior is needed for 'gaussian' family.")
 
         if "seasons" in specification and type(specification["seasons"]==list) and len(specification["seasons"]) > 0:
-            seasons.resize(len(specification["seasons"]))
             for season in specification["seasons"]:
                 if "duration" in season and "number_of_seasons" in season:
                     seasons.push_back(SeasonSpecification(<int>(season["number_of_seasons"]),
@@ -496,7 +495,6 @@ cdef class PyBsts:
 
         if "predictor_names" in specification and type(specification["predictor_names"])==list \
                 and len(specification["predictor_names"]) > 0:
-            predictor_names.resize(len(specification["predictor_names"]))
             for name in specification["predictor_names"]:
                 predictor_names.push_back(_bytes(name))
 

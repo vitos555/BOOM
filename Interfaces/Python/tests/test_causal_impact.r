@@ -1,9 +1,11 @@
+#!R -d lldb
 devtools::load_all(path="Boom")
 devtools::load_all(path="BoomSpikeSlab")
 devtools::load_all(path="bsts")
 
 x <- data.frame(y <- c(1.0, 2.0, 3.0, 4.0, 4.5, NA, NA), a=c(1.0, 2.0, 0.0, 0.0, 0.0, 3.5, 0.0), b=c(0.0, 0.0, 3.0, 4.0, 4.4, 0.0, 2.5))
 ss <- AddLocalLevel(list(), y)
+ss <- AddSeasonal(ss, y, 3)
 m <- bsts(y ~ a + b, data=x, ss, seed=1, niter=1000)
 
 alpha <- 0.05
