@@ -116,6 +116,7 @@ class CausalImpact:
         sigma_obs = self.bsts.results("sigma.obs")[self.burn:]
         sigma_obs = np.reshape(np.repeat(sigma_obs, pred_mean.shape[1]),
                                pred_mean.shape)
+        np.random.seed(self.seed)
         noise = np.random.normal(0, sigma_obs)
         nan_mid_y = np.repeat(np.nan, mid_hold_y.shape[0])
         pred = pred_mean + noise

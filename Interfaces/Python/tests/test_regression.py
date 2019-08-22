@@ -10,11 +10,7 @@ specification = {"local_trend": {"static_intercept": True},
                  "sigma_prior": np.std(y, ddof=1), "initial_value": y[0], "mean_value": np.mean(y), 
                  "predictor_names": ["first", "second"]}
 b = pybsts.PyBsts("gaussian", specification, 
-                  {"ping": 10, "niter":100, "burn": 10, "forecast_horizon": 2})
-print(b.crepr().decode("UTF-8"))
-b.fit(X, y, seed=1)
-#print(b.crepr().decode("UTF-8"))
+                  {"ping": 10, "niter":100, "burn": 10, "forecast_horizon": 2, "seed": 1})
+b.fit(X.T, y, seed=1)
 res = b.predict(np.array([[1.0, 0.0], [2.0, 0.0]]), [6, 7], seed=1)
 print(res)
-#print(b.crepr().decode("UTF-8"))
-print(b.results("state.contributions"))
