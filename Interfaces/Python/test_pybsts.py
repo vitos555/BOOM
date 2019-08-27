@@ -23,3 +23,6 @@ print(forecast.size())
 print(forecast.nrow())
 for i in forecast:
 	print(i)
+print(state_space_model.number_of_state_models())
+print(state_space_model.state_contributions())
+print(state_space_model.parameter_vector())

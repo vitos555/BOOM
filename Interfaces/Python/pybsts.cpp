@@ -1,4 +1,5 @@
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 #include "Models/GaussianModel.hpp"
 #include "Models/ChisqModel.hpp"
@@ -20,6 +21,7 @@ PYBIND11_MODULE(pybsts, m) {
 
     // Vector
     py::class_<Vector>(m, "Vector")
+        .def("size", &Vector::size)
         .def("__getitem__",
                 [](Vector &v, int i) -> double & {
                     return v[i];
@@ -67,6 +69,25 @@ PYBIND11_MODULE(pybsts, m) {
     // DataPolicy
     py::class_<IID_DataPolicy<StateSpace::MultiplexedDoubleData>>(m, "MultiplexedDoubleDataPolicy");
 
+    // Params
+    py::class_<Params, Ptr<Params>, Data>(m, "Params");
+    py::class_<ParamVector>(m, "ParamVector")
+        .def("size", &ParamVector::size)
+        .def("__getitem__",
+                [](ParamVector &v, int i) -> Ptr<Params> & {
+                    return v[i];
+                },
+                py::return_value_policy::reference_internal // ref + keepalive
+            )
+        .def("__iter__",
+                [](ParamVector &v) {
+                   return py::make_iterator<
+                         py::return_value_policy::copy, ParamVector::iterator, ParamVector::iterator, Ptr<Params> >(
+                        v.begin(), v.end());
+                },
+                py::keep_alive<0, 1>() /* Essential: keep list alive while iterator exists */
+            );
+
     // Models
     py::class_<GammaModelBase, Ptr<GammaModelBase> >(m, "GammaModelBase");
 
@@ -101,7 +122,12 @@ PYBIND11_MODULE(pybsts, m) {
         .def("set_method", &StateSpaceModel::set_method)
         .def("sample_posterior", &StateSpaceModel::sample_posterior)
         .def("add_data", (void (IID_DataPolicy<StateSpace::MultiplexedDoubleData>::*)(StateSpace::MultiplexedDoubleData *)) &IID_DataPolicy<StateSpace::MultiplexedDoubleData>::add_data)
-        .def("add_state", &StateSpaceModelBase::add_state)
+        .def("add_state", &StateSpaceModel::add_state)
+        .def("number_of_state_models", &StateSpaceModel::number_of_state_models)
+        .def("state_model", (Ptr<StateModel>(StateSpaceModel::*)(int)) &StateSpaceModel::state_model)
+        .def("state_contributions", &StateSpaceModel::state_contributions)
+        .def("state_contribution", &StateSpaceModel::state_contribution)
+        .def("parameter_vector", (ParamVector (StateSpaceModel::*)()) &StateSpaceModel::parameter_vector)
         .def("forecast", &StateSpaceModel::forecast)
         .def("observation_model", (ZeroMeanGaussianModel *(StateSpaceModel::*)()) &StateSpaceModel::observation_model, 
              "Get pointer to observation model", py::return_value_policy::reference_internal);
@@ -110,6 +136,7 @@ PYBIND11_MODULE(pybsts, m) {
     py::class_<StateModel, Ptr<StateModel>, StateModelBase>(m, "StateModel");
     py::class_<StaticInterceptStateModel, Ptr<StaticInterceptStateModel>, StateModel>(m, "StaticInterceptStateModel")
         .def(py::init<>())
+        .def("parameter_vector", (ParamVector (StaticInterceptStateModel::*)()) &StaticInterceptStateModel::parameter_vector)
         .def("set_initial_state_mean", &StaticInterceptStateModel::set_initial_state_mean)
         .def("set_initial_state_variance", &StaticInterceptStateModel::set_initial_state_variance);
 
