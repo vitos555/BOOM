@@ -8,7 +8,7 @@ all:	libboom.a
 # passed to make can be specified here.
 # -k:  keep going
 # -j 8: use 8 threads
-# MAKEFLAGS=" -k -j 8 "
+MAKEFLAGS=" -k -j 8 "
 
 CFLAGS = -I. -I./Bmath -I./math/cephes -DADD_ -O3 
 CPPFLAGS = -I. -I./Bmath -I./math/cephes -std=c++11 -DADD_ -O3 

@@ -57,7 +57,7 @@ PYBIND11_MODULE(pybsts, m) {
 
     // Data
     py::class_<Data, Ptr<Data> >(m, "Data");
-    py::class_<DoubleData, Ptr<DoubleData> >(m, "DoubleData")
+    py::class_<DoubleData, Ptr<DoubleData>, Data>(m, "DoubleData")
         .def(py::init<double>());
     py::class_<StateSpace::MultiplexedData, Ptr<StateSpace::MultiplexedData>, Data>(m, "MultiplexedData");
     py::class_<StateSpace::MultiplexedDoubleData, Ptr<StateSpace::MultiplexedDoubleData>, StateSpace::MultiplexedData>(m, "MultiplexedDoubleData")
@@ -68,9 +68,9 @@ PYBIND11_MODULE(pybsts, m) {
     py::class_<IID_DataPolicy<StateSpace::MultiplexedDoubleData>>(m, "MultiplexedDoubleDataPolicy");
 
     // Models
-    py::class_<GammaModelBase>(m, "GammaModelBase");
+    py::class_<GammaModelBase, Ptr<GammaModelBase> >(m, "GammaModelBase");
 
-    py::class_<ChisqModel, GammaModelBase>(m, "ChisqModel")
+    py::class_<ChisqModel, Ptr<ChisqModel>, GammaModelBase>(m, "ChisqModel")
         .def(py::init<double, double>())
         .def("sample_posterior", &ChisqModel::sample_posterior)
         .def_property("df", &ChisqModel::df, &ChisqModel::set_df)
@@ -79,24 +79,24 @@ PYBIND11_MODULE(pybsts, m) {
         .def("beta", &ChisqModel::beta)
         .def("sum_of_squares", &ChisqModel::sum_of_squares);
 
-    py::class_<GaussianModelBase>(m, "GaussianModelBase");
+    py::class_<GaussianModelBase, Ptr<GaussianModelBase> >(m, "GaussianModelBase");
 
-    py::class_<GaussianModel, GaussianModelBase>(m, "GaussianModel")
+    py::class_<GaussianModel, Ptr<GaussianModel>, GaussianModelBase>(m, "GaussianModel")
         .def(py::init<double, double>())
         .def("set_method", &GaussianModel::set_method)
         .def("sample_posterior", &GaussianModel::sample_posterior)
         .def_property("mu", &GaussianModel::mu, &GaussianModel::set_mu)
         .def_property("sigsq", &GaussianModel::sigsq, &GaussianModel::set_sigsq);
 
-    py::class_<ZeroMeanGaussianModel, GaussianModelBase>(m, "ZeroMeanGaussianModel")
+    py::class_<ZeroMeanGaussianModel, Ptr<ZeroMeanGaussianModel>, GaussianModelBase>(m, "ZeroMeanGaussianModel")
         .def(py::init<>())
         .def("set_method", &ZeroMeanGaussianModel::set_method)
         .def("sample_posterior", &ZeroMeanGaussianModel::sample_posterior)
         .def_property("sigsq", &ZeroMeanGaussianModel::sigsq, &ZeroMeanGaussianModel::set_sigsq);
 
-    py::class_<StateSpaceModelBase>(m, "StateSpaceModelBase");
+    py::class_<StateSpaceModelBase, Ptr<StateSpaceModelBase> >(m, "StateSpaceModelBase");
 
-    py::class_<StateSpaceModel, StateSpaceModelBase, IID_DataPolicy<StateSpace::MultiplexedDoubleData>>(m, "StateSpaceModel")
+    py::class_<StateSpaceModel, Ptr<StateSpaceModel>, StateSpaceModelBase>(m, "StateSpaceModel")
         .def(py::init<>())
         .def("set_method", &StateSpaceModel::set_method)
         .def("sample_posterior", &StateSpaceModel::sample_posterior)
@@ -104,7 +104,7 @@ PYBIND11_MODULE(pybsts, m) {
         .def("add_state", &StateSpaceModelBase::add_state)
         .def("forecast", &StateSpaceModel::forecast)
         .def("observation_model", (ZeroMeanGaussianModel *(StateSpaceModel::*)()) &StateSpaceModel::observation_model, 
-             "Get pointer to observation model", py::return_value_policy::reference);
+             "Get pointer to observation model", py::return_value_policy::reference_internal);
 
     py::class_<StateModelBase, Ptr<StateModelBase> >(m, "StateModelBase");
     py::class_<StateModel, Ptr<StateModel>, StateModelBase>(m, "StateModel");
@@ -120,7 +120,7 @@ PYBIND11_MODULE(pybsts, m) {
         .def(py::init<StateSpaceModelBase *>());
 
     py::class_<ZeroMeanGaussianConjSampler, Ptr<ZeroMeanGaussianConjSampler>, PosteriorSampler>(m, "ZeroMeanGaussianConjSampler")
-        .def(py::init<ZeroMeanGaussianModel *, GammaModelBase *>());
+        .def(py::init<ZeroMeanGaussianModel *, Ptr<GammaModelBase> &>());
 
     }
 }
