@@ -57,7 +57,6 @@ namespace BOOM {
     return (A.nrow() == B.nrow()) && (A.ncol() == B.ncol());
   }
 
-  using namespace std;
   Matrix::Matrix() : V(), nr_(0), nc_(0) {}
 
   Matrix::Matrix(uint nr, uint nc, double x)
@@ -77,7 +76,7 @@ namespace BOOM {
   Matrix::Matrix(uint nr, uint nc, const ConstVectorView &v, bool byrow)
       : V(v), nr_(nr), nc_(nc) {
     if (v.size() != nr * nc) {
-      ostringstream err;
+      std::ostringstream err;
       err << "Size of vector (" << v.size() << ") does not match dimensions ("
           << nr << ", " << nc << ") in Matrix constructor.";
       report_error(err.str());
@@ -94,7 +93,7 @@ namespace BOOM {
 
   Matrix::Matrix(const std::string &s, const std::string &row_delim) {
     BOOM::StringSplitter rowsplit(row_delim);
-    std::vector<string> row_strings = rowsplit(s);
+    std::vector<std::string> row_strings = rowsplit(s);
 
     nr_ = row_strings.size();
     std::vector<Vector> v;
@@ -106,9 +105,9 @@ namespace BOOM {
       if (i == 0) {
         nc_ = v[0].size();
       } else if (v[i].size() != nc_) {
-        string msg =
+        std::string msg =
             "Attempt to initialize Matrix with rows of differing lengths";
-        report_error(msg.c_str());
+        report_error(msg);
       }
     }
     V.resize(nr_ * nc_);
@@ -591,7 +590,7 @@ namespace BOOM {
     }
     return ans;
   }
-  
+
   Matrix &Matrix::multT(const DiagonalMatrix &d, Matrix &ans,
                         double scal) const {
     return mult(d, ans, scal);
@@ -664,7 +663,7 @@ namespace BOOM {
     return *this;
   }
 
-  SpdMatrix Matrix::inner() const {  
+  SpdMatrix Matrix::inner() const {
     SpdMatrix ans(nc_, 0.0);
     EigenMap(ans) = EigenMap(*this).transpose() * EigenMap(*this);
     return ans;
@@ -680,7 +679,7 @@ namespace BOOM {
     }
     return Tmult(tmp);
   }
-  
+
   SpdMatrix Matrix::outer() const {
     SpdMatrix ans(nr_);
     EigenMap(ans).selfadjointView<Eigen::Upper>().rankUpdate(EigenMap(*this),
@@ -727,7 +726,7 @@ namespace BOOM {
     QR qr(*this);
     return qr.logdet();
   }
-  
+
   Vector Matrix::singular_values() const {
     Vector values(std::min(nr_, nc_));
     ::Eigen::JacobiSVD<Eigen::MatrixXd> svd(
@@ -886,6 +885,35 @@ namespace BOOM {
     return *this;
   }
 
+  namespace {
+    template <class MAT>
+    Matrix & incremental_division_impl(Matrix &m1, const MAT &m2) {
+      if (m1.nrow() != m2.nrow() || m1.ncol() != m2.ncol()) {
+        report_error("Element-wise division requires matrices have the "
+                     "same dimension.");
+      }
+      for (int i = 0; i < m1.nrow(); ++i) {
+        for (int j = 0; j < m1.ncol(); ++j) {
+          m1(i, j) /= m2(i, j);
+        }
+      }
+      return m1;
+    }
+
+  } // namespace
+
+  Matrix &Matrix::operator/=(const Matrix &m) {
+    return incremental_division_impl(*this, m);
+  }
+
+  Matrix &Matrix::operator/=(const SubMatrix &m) {
+    return incremental_division_impl(*this, m);
+  }
+
+  Matrix &Matrix::operator/=(const ConstSubMatrix &m) {
+    return incremental_division_impl(*this, m);
+  }
+
   Matrix &Matrix::operator-=(const ConstSubMatrix &m) {
     SubMatrix lhs(*this);
     lhs -= m;
@@ -944,23 +972,21 @@ namespace BOOM {
     return x.display(out, 5);
   }
 
-  void print(const Matrix &m) { cout << m << endl; }
+  void print(const Matrix &m) { std::cout << m << std::endl; }
 
-  istream &operator>>(istream &in, Matrix &m) {
+  std::istream &operator>>(std::istream &in, Matrix &m) {
     // reads until a blank line is found or the end of a line
 
-    typedef std::vector<string> svec;
-
-    svec lines;
+    std::vector<std::string> lines;
     while (in) {
-      string line;
+      std::string line;
       getline(in, line);
       if (is_all_white(line)) break;
       lines.push_back(line);
     }
     uint nrows = lines.size();
     StringSplitter split;
-    svec splitline(split(lines[0]));
+    std::vector<std::string> splitline(split(lines[0]));
     uint ncols = splitline.size();
 
     if (m.nrow() != nrows || m.ncol() != ncols) {
@@ -968,7 +994,7 @@ namespace BOOM {
     }
 
     for (uint j = 0; j < ncols; ++j) {
-      istringstream sin(splitline[j]);
+      std::istringstream sin(splitline[j]);
       sin >> m(0, j);
     }
 
@@ -976,25 +1002,18 @@ namespace BOOM {
       splitline = split(lines[i]);
       assert(splitline.size() == ncols);
       for (uint j = 0; j < ncols; ++j) {
-        istringstream sin(splitline[j]);
+        std::istringstream sin(splitline[j]);
         sin >> m(i, j);
       }
     }
     return in;
   }
 
-  Matrix operator-(const double y, const Matrix &x) {
-    Matrix ans = -x;
-    ans += y;
-    return ans;
-  }
-
   Matrix operator/(const double y, const Matrix &x) {
     Matrix ans = x;
-    transform(ans.begin(),
-              ans.end(),
-              ans.begin(),
-              bind1st(std::divides<double>(), y));
+    for (auto &el : ans) {
+      el = y / el;
+    }
     return ans;
   }
 
@@ -1105,7 +1124,7 @@ namespace BOOM {
     std::transform(ans.begin(),
                    ans.end(),
                    ans.begin(),
-                   pointer_to_unary_function<double, double>(std::log));
+                   [](double x) {return std::log(x);});
     return ans;
   }
 
@@ -1114,7 +1133,7 @@ namespace BOOM {
     std::transform(ans.begin(),
                    ans.end(),
                    ans.begin(),
-                   pointer_to_unary_function<double, double>(std::exp));
+                   [](double x) {return std::exp(x);});
     return ans;
   }
 
@@ -1344,7 +1363,7 @@ namespace BOOM {
     EigenMap(ans) = EigenMap(L).triangularView<Eigen::Lower>().transpose() * EigenMap(y);
     return ans;
   }
-  
+
   Vector &Lsolve_inplace(const Matrix &L, Vector &b) {
     assert(L.is_square() && L.nrow() == b.size());
     EigenMap(L).triangularView<Eigen::Lower>().solveInPlace(EigenMap(b));
@@ -1451,5 +1470,5 @@ namespace BOOM {
     }
     return ans;
   }
-  
+
 }  // namespace BOOM

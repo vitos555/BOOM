@@ -1,17 +1,24 @@
 #!/bin/bash
 
-usage () { echo "Usage: $0 [-c] [-i] 1>&2; exit 0"; }
+usage () { echo "Usage: $0 [-c] [-r] [-C] 1>&2; exit 0";
+           echo " -i: Install the package"
+           echo " -c: Check the package using R CMD CHECK"
+           echo " -C: Check the package for submission to CRAN using R CMD CHECK --as-cran"
+         }
 
 DO_INSTALL=0
 DO_CHECK=0
 
-while getopts :ci option; do
+while getopts :ciC option; do
     case "${option}" in
         i)
             DO_INSTALL=1
             ;;
         c)
             DO_CHECK=1
+            ;;
+        C)
+            DO_CHECK_AS_CRAN=1
             ;;
         \?)
 	    echo "Invalid option: -$OPTARG" >&2
@@ -38,6 +45,13 @@ cp Interfaces/R/Boom/NAMESPACE $BOOM_DIR
 ##----------------------------------------------------------------------
 ## Source:
 ## Create the source directory and copy top-level files.
+backup_files=`find . -name "\.#*"`
+if [ ! -z $backup_files ]
+then
+    echo "Removing backup files: $backup_files"
+    rm $backup_files
+fi
+
 echo "Copying source files"
 mkdir $BOOM_DIR/src
 cp Interfaces/R/*.cpp $BOOM_DIR/src
@@ -93,14 +107,28 @@ HDRS="$HDRS `find numopt -name "*.hpp"`"
 HDRS="$HDRS `find Samplers -name "*.hpp"`"
 HDRS="$HDRS `find stats -name "*.hpp"`"
 HDRS="$HDRS `find TargetFun -name "*.hpp"`"
-#HDRS="$HDRS `find Eigen -name "*.h"`"
+HDRS="$HDRS `find Eigen -name "*.h"`"
 ./install/install_headers.py $HDRS $BOOM_DIR/inst/include
 
 ## Put the headers from Interfaces/R in the r_interface directory.
 mkdir $BOOM_DIR/inst/include/r_interface
 cp Interfaces/R/*.hpp $BOOM_DIR/inst/include/r_interface
-#cp Eigen/* $BOOM_DIR/inst/include/Eigen/
+cp Eigen/* $BOOM_DIR/inst/include/Eigen/
 #echo "Ignore the message about not being able to copy Eigen/src."
+
+## Fix warning supression in Eigen, which violates CRAN policy
+fname=$BOOM_DIR/inst/include/Eigen/src/Core/arch/SSE/Complex.h
+gsed -i 's|#pragma GCC|// #pragma GCC|g' $fname
+gsed -i 's|#pragma GCC|// #pragma GCC|g' $fname
+
+fname=$BOOM_DIR/inst/include/Eigen/src/Core/util/DisableStupidWarnings.h
+
+gsed -i 's|#pragma clang diagnostic ignored|// #pragma clang diagnostic ignored|g' $fname
+gsed -i 's|#pragma clang diagnostic push|// #pragma clang diagnostic push|g' $fname
+
+gsed -i 's|#pragma GCC diagnostic ignored|// #pragma GCC diagnostic ignored|g' $fname
+gsed -i 's|#pragma GCC diagnostic push|// #pragma GCC diagnostic push|g' $fname
+
 
 ##----------------------------------------------------------------------
 ## Build the package:
@@ -111,6 +139,10 @@ R CMD build Boom
 
 if [[ $DO_CHECK = 1 ]]; then
     MAKEFLAGS=" j 16 " R CMD CHECK Boom_*.tar.gz
+fi
+
+if [[ $DO_CHECK_AS_CRAN = 1 ]]; then
+    MAKEFLAGS=" j 16 " R CMD CHECK --as-cran Boom_*.tar.gz
 fi
 
 if [[ $DO_INSTALL = 1 ]]; then

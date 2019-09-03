@@ -19,30 +19,29 @@
 #ifndef BOOM_PORTABLE_MATH_HPP_
 #define BOOM_PORTABLE_MATH_HPP_
 
-// For platforms that do not implement the full cmath library required
-// by the standard, pull the implementation from boost into namespace
-// std.
-
 #ifdef _MSC_VER
-#include <boost/math/special_functions/fpclassify.hpp>
 namespace std {
-  using boost::math::isnan;
+  inline bool isnan(double x) { return x != x; }
 }
 #endif  // _MSC_VER
 
 #ifdef __sun
 // Provide versions of isnan and isfinite that solaris chooses not to
 // provide.
-#include <boost/math/special_functions/fpclassify.hpp>
 namespace std {
-  using boost::math::isfinite;
-  using boost::math::isnan;
+  inline bool isnan(double x) {
+    return x != x;
+  }
+  inline bool isfinite(double x) {
+    return x == x
+        && x <= std::numeric_limits<double>::max()
+        && x >= std::numeric_limits<double>::min();
+  }
 }  // namespace std
 #endif  // __sun
 
-#include <boost/math/special_functions/round.hpp>
 namespace BOOM {
-  using boost::math::lround;
+  using std::lround;
 }
 
 #endif  // BOOM_PORTABLE_MATH_HPP_

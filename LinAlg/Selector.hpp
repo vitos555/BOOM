@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "LinAlg/DiagonalMatrix.hpp"
 #include "LinAlg/Matrix.hpp"
 #include "LinAlg/SpdMatrix.hpp"
 #include "LinAlg/SubMatrix.hpp"
@@ -48,6 +49,7 @@ namespace BOOM {
 
     // Using this constructor, Selector s("10") would have s[0] = true
     // and s[1] = false.
+    explicit Selector(const char *zeros_and_ones);
     explicit Selector(const std::string &zeros_and_ones);
     explicit Selector(const std::vector<bool> &values);
     Selector(const std::vector<uint> &pos, uint n);
@@ -129,10 +131,12 @@ namespace BOOM {
     // Returns the position of the ith nonzero element in the expanded sparse
     // vector.
     uint indx(uint i) const;  // i=0..n-1, ans in 0..N-1
+    uint sparse_index(uint dense_index) const { return indx(dense_index); }
 
     // Returns the position in the condensed (dense) vector corresponding to
     // position I in the expanded (sparse) vector.
     uint INDX(uint I) const;  // I=0..N-1, ans in 0..n-1
+    uint dense_index(uint sparse_index) const { return INDX(sparse_index); }
 
     // Returns the index of a randomly selected included (or excluded)
     // element.  If no (all) elements are included then -1 is returned
@@ -155,6 +159,10 @@ namespace BOOM {
     Matrix select_rows(const SubMatrix &M) const;
     Matrix select_rows(const ConstSubMatrix &M) const;
 
+    DiagonalMatrix select_square(const DiagonalMatrix &diag) const;
+    DiagonalMatrix select(const DiagonalMatrix &diag) const {
+      return select_square(diag);
+    }
 
     template <class T>
     std::vector<T> select(const std::vector<T> &stuff) const;
@@ -164,7 +172,19 @@ namespace BOOM {
     Vector expand(const VectorView &x) const;
     Vector expand(const ConstVectorView &x) const;
 
-    Vector &zero_missing_elements(Vector &v) const;
+    // Fill the missing elements of a vector with specfic values.
+    // Args:
+    //   v: The vector to be partially filled.
+    //   value/values:  The values to be filled in for v[i] where *this[i] is false.
+    //     In the vector version, values must have size nvars_excluded().
+    // Returns:
+    //   The excluded elements of v are filled with the supplied values, and the
+    //   modified v is returned.
+    Vector &zero_missing_elements(Vector &v) const {
+      return fill_missing_elements(v, 0.0); }
+    Vector &fill_missing_elements(Vector &v, double value) const;
+    Vector &fill_missing_elements(Vector &v,
+                                  const ConstVectorView &values) const;
 
     template <class T>
     T sub_select(const T &x, const Selector &rhs) const;
@@ -222,8 +242,8 @@ namespace BOOM {
   };
   //______________________________________________________________________
 
-  ostream &operator<<(ostream &, const Selector &);
-  istream &operator>>(istream &, Selector &);
+  std::ostream &operator<<(std::ostream &, const Selector &);
+  std::istream &operator>>(std::istream &, Selector &);
 
   template <class T>
   std::vector<T> select(const std::vector<T> &v, const std::vector<bool> &vb) {
@@ -313,6 +333,7 @@ namespace BOOM {
     void drop(int i, int j) {columns_[j].drop(i);}
 
     const Selector &col(int i) const {return columns_[i];}
+    Selector row(int i) const;
 
     // Indicate whether each row is included by at least one column.
     Selector row_any() const;
