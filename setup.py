@@ -45,13 +45,6 @@ def find_cpp(path, recursive=True, exclude=[]):
                 ret.append(os.path.join(path, file))
     return ret
 
-if not os.path.exists("boost_1_68_0"):
-    subprocess.run(["curl", "-L", "-O", "https://dl.bintray.com/boostorg/release/1.68.0/source/boost_1_68_0.tar.gz"])
-    subprocess.run(["tar", "-xf", "boost_1_68_0.tar.gz"])
-    os.remove("boost_1_68_0.tar.gz")
-
-INCLUDE_DIRS += ["./boost_1_68_0"]
-
 extensions = [Extension("pybsts", 
     ["Interfaces/Python/bsts/pybsts" + file_ext,
      "Interfaces/Python/bsts/model_manager.cpp",
@@ -88,7 +81,7 @@ setup(
     author="Vitalii Ostrovskyi",
     author_email="vitos@vitos.org.ua",
     description="Python interface to Bayesian Structured Time Series",
-    version='1.0.2',
+    version='1.0.3',
     ext_modules=extensions,
     install_requires=['cython', 'numpy'],
     packages=['causal_impact'],
