@@ -166,7 +166,7 @@ setup(
         'License :: OSI Approved :: GNU Lesser General Public License v2 or later (LGPLv2+)',
     ],
     license="LGPL 2.1",
-    keywords="bsts,pybsts,bayesian time series,time series,prediction"
+    keywords="bsts,pybsts,bayesian time series,time series,prediction",
     version='1.0.7',
     include_package_data=True,
     ext_modules=extensions,
