@@ -81,7 +81,7 @@ setup(
     author="Vitalii Ostrovskyi",
     author_email="vitos@vitos.org.ua",
     description="Python interface to Bayesian Structured Time Series",
-    version='1.0.5',
+    version='1.0.6',
     include_package_data=True,
     ext_modules=extensions,
     install_requires=['cython', 'numpy'],
